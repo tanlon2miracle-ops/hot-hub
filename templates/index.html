@@ -10,42 +10,57 @@
   <header>
     <div class="header-inner">
       <h1>🔥 Hot Hub</h1>
-      <p class="subtitle">全网热榜聚合 · 更新于 {{ update_time }}</p>
-      <a href="/api/refresh" class="btn-refresh" onclick="this.textContent='刷新中...'; return true;">🔄 刷新数据</a>
+      <p class="subtitle">{{ total_platforms }} 个平台热榜聚合 · 更新于 {{ update_time }}</p>
+      <div class="header-actions">
+        <a href="/api/refresh" class="btn-refresh" onclick="this.textContent='刷新中...'; return true;">🔄 刷新数据</a>
+      </div>
+      <!-- 分类快速跳转 -->
+      <nav class="cat-nav">
+        {% for cat in categories %}
+        <a href="#cat-{{ cat.key }}" class="cat-link">{{ cat.name }}</a>
+        {% endfor %}
+      </nav>
     </div>
   </header>
 
-  <main class="grid">
-    {% for platform in platforms %}
-    <section class="card">
-      <div class="card-header">
-        <span class="card-icon">{{ platform.icon }}</span>
-        <h2>{{ platform.name }}</h2>
-        <span class="card-count">{{ platform.items | length }} 条</span>
-      </div>
-      <div class="card-body">
-        {% if platform.items %}
-        <ol class="hot-list">
-          {% for item in platform.items %}
-          <li class="hot-item {% if loop.index <= 3 %}hot-top{% endif %}">
-            <span class="hot-rank {% if loop.index <= 3 %}rank-top{% endif %}">{{ item.rank }}</span>
-            <a href="{{ item.url }}" target="_blank" rel="noopener" class="hot-title">{{ item.title }}</a>
-            {% if item.hot %}
-            <span class="hot-value">{{ item.hot }}</span>
+  <main>
+    {% for cat in categories %}
+    <section class="category" id="cat-{{ cat.key }}">
+      <h2 class="cat-title">{{ cat.name }}</h2>
+      <div class="grid">
+        {% for platform in cat.platforms %}
+        <div class="card">
+          <div class="card-header">
+            <span class="card-icon">{{ platform.icon }}</span>
+            <h3>{{ platform.name }}</h3>
+            <span class="card-count">{{ platform.items | length }} 条</span>
+          </div>
+          <div class="card-body">
+            {% if platform.items %}
+            <ol class="hot-list">
+              {% for item in platform.items[:20] %}
+              <li class="hot-item {% if loop.index <= 3 %}hot-top{% endif %}">
+                <span class="hot-rank {% if loop.index <= 3 %}rank-top{% endif %}">{{ item.rank }}</span>
+                <a href="{{ item.url }}" target="_blank" rel="noopener" class="hot-title">{{ item.title }}</a>
+                {% if item.hot %}
+                <span class="hot-value">{{ item.hot }}</span>
+                {% endif %}
+              </li>
+              {% endfor %}
+            </ol>
+            {% else %}
+            <div class="empty">暂无数据</div>
             {% endif %}
-          </li>
-          {% endfor %}
-        </ol>
-        {% else %}
-        <div class="empty">暂无数据，可能接口需要更新</div>
-        {% endif %}
+          </div>
+        </div>
+        {% endfor %}
       </div>
     </section>
     {% endfor %}
   </main>
 
   <footer>
-    <p>Hot Hub · 仅供个人学习使用 · <a href="https://github.com/tanlon2miracle-ops/hot-hub" target="_blank">GitHub</a></p>
+    <p>Hot Hub · {{ total_platforms }} 个平台 · 仅供个人学习 · <a href="https://github.com/tanlon2miracle-ops/hot-hub" target="_blank">GitHub</a></p>
   </footer>
 </body>
 </html>
