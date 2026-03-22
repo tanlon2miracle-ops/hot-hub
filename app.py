@@ -74,16 +74,19 @@ async def index(request: Request):
     keys = [p[0] for p in PLATFORMS]
     results = await asyncio.gather(*[_fetch_with_cache(k) for k in keys])
 
-    # 按分类组织
+    # 按分类组织（跳过没有数据的平台）
     platform_data = {}
     for (key, name, icon, cat), data in zip(PLATFORMS, results):
+        entries = data if isinstance(data, list) else []
+        if not entries:
+            continue  # 没爬到数据的平台不展示
         if cat not in platform_data:
             platform_data[cat] = []
         platform_data[cat].append({
             "key": key,
             "name": name,
             "icon": icon,
-            "entries": data if isinstance(data, list) else [],
+            "entries": entries,
         })
 
     categories = []
@@ -95,11 +98,14 @@ async def index(request: Request):
                 "platforms": platform_data[cat_key],
             })
 
+    # 统计实际有数据的平台数
+    active_count = sum(len(cat["platforms"]) for cat in categories)
+
     return templates.TemplateResponse("index.html", {
         "request": request,
         "categories": categories,
         "update_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "total_platforms": len(PLATFORMS),
+        "total_platforms": active_count,
     })
 
 

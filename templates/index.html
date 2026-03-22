@@ -36,7 +36,6 @@
             <span class="card-count">{{ platform.entries | length }} 条</span>
           </div>
           <div class="card-body">
-            {% if platform.entries %}
             <ol class="hot-list">
               {% for item in platform.entries[:20] %}
               <li class="hot-item {% if loop.index <= 3 %}hot-top{% endif %}">
@@ -48,9 +47,6 @@
               </li>
               {% endfor %}
             </ol>
-            {% else %}
-            <div class="empty">暂无数据</div>
-            {% endif %}
           </div>
         </div>
         {% endfor %}
