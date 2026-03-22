@@ -31,7 +31,7 @@ python app.py
 启动后：
 1. 自动初始化 SQLite 数据库（`data/hot_hub.db`）
 2. 如果数据库为空，立即执行首次爬取
-3. 之后每 10 分钟自动爬取一次
+3. 之后每小时自动爬取一次
 4. 每天凌晨 3:00 自动清理 30 天前的旧数据
 
 ## API 接口
@@ -235,7 +235,7 @@ hot-hub/
 ## ⚠️ 注意
 
 - 各平台接口随时可能变更，爬虫需要定期维护
-- 默认每 10 分钟爬取一次，可在启动时调整 `start_scheduler(interval_minutes=N)`
+- 默认每小时爬取一次，可在启动时调整 `start_scheduler(interval_minutes=N)`
 - `data/` 目录已加入 `.gitignore`，数据库不会上传到 Git
 - 仅供个人学习使用
 

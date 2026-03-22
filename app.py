@@ -29,7 +29,7 @@ from scheduler import (
 async def lifespan(app: FastAPI):
     """启动时初始化 DB + 调度器，关闭时停止"""
     init_db()
-    start_scheduler(interval_minutes=10)
+    start_scheduler(interval_minutes=60)
     # 启动后立即执行一次爬取（如果数据库为空）
     latest = get_latest_batch()
     if not latest:
