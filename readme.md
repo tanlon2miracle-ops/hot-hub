@@ -5,15 +5,19 @@
 ## 功能
 
 - ✅ 40+ 平台热榜聚合，分类展示
-- ✅ 5 分钟缓存，单源失败不影响其他
+- ✅ **SQLite 结构化存储**，历史数据可追溯
+- ✅ **定时自动爬取**（默认每 10 分钟），30 天自动清理
+- ✅ 没有爬到数据的平台自动隐藏，页面只展示有效内容
+- ✅ 5 分钟内存缓存 + 数据库持久化双层架构
 - ✅ 分类快速跳转导航
 - ✅ 响应式网格布局
-- ✅ `/api/refresh` 手动刷新缓存
 
 ## 技术栈
 
 - **后端**：Python 3.10+ / FastAPI
 - **爬虫**：httpx + BeautifulSoup（各平台公开 API / 页面解析）
+- **存储**：SQLite（WAL 模式，支持并发读写）
+- **调度**：APScheduler（异步调度，与 FastAPI 生命周期集成）
 - **前端**：Jinja2 模板 + 原生 CSS
 
 ## 快速开始
@@ -24,11 +28,27 @@ python app.py
 # 打开 http://localhost:8000
 ```
 
+启动后：
+1. 自动初始化 SQLite 数据库（`data/hot_hub.db`）
+2. 如果数据库为空，立即执行首次爬取
+3. 之后每 10 分钟自动爬取一次
+4. 每天凌晨 3:00 自动清理 30 天前的旧数据
+
+## API 接口
+
+| 路径 | 方法 | 说明 |
+|------|------|------|
+| `/` | GET | 聚合热榜页面（优先读 DB，回退实时爬取） |
+| `/api/refresh` | GET | 手动触发爬取并保存到数据库 |
+| `/api/status` | GET | 查看调度器状态和最新批次信息 |
+| `/api/history` | GET | 获取爬取批次历史（`?limit=20`） |
+| `/api/platform/{name}` | GET | 查看某平台的历史数据（`?limit=10`） |
+
 ---
 
 ## 平台支持状态
 
-> ✅ 已验证可用 · ⚠️ 接口不稳定/空数据 · ❌ 待修复 · 🔲 计划中
+> ✅ 已验证可用 · ❌ 待修复
 
 ### 🔥 热搜热榜
 
@@ -77,11 +97,11 @@ python app.py
 | 豆瓣小组 | ✅ | douban.com 发现页解析 |
 | 简书 | ✅ | jianshu.com 首页解析 |
 | 果壳 | ✅ | guokr.com API |
+| 全球主机交流 | ✅ | hostloc.com 论坛解析 |
 | 虎扑 | ❌ | API 404，接口已变更 |
 | 酷安 | ❌ | 页面解析失败 |
 | NGA | ❌ | 403 反爬 |
 | 吾爱破解 | ❌ | 页面解析空数据 |
-| 全球主机交流 | ✅ | hostloc.com 论坛解析 |
 
 ### 🎬 影音游戏
 
@@ -110,14 +130,44 @@ python app.py
 | 状态 | 数量 |
 |------|------|
 | ✅ 已通过 | 23 |
-| ❌/⚠️ 待修复 | 20 |
+| ❌ 待修复 | 20 |
 | **总计** | **43** |
 
 ---
 
-## TODO
+## 数据存储
 
-待修复和后续计划：
+采用 SQLite 结构化存储，数据库文件位于 `data/hot_hub.db`。
+
+### 表结构
+
+```
+fetch_batch          # 爬取批次
+├── id               # 批次 ID（自增）
+├── created_at       # 爬取时间
+├── platform_count   # 成功平台数
+└── item_count       # 总条目数
+
+hot_item             # 热榜条目
+├── id               # 条目 ID
+├── batch_id         # 所属批次（外键）
+├── platform         # 平台 key（weibo/zhihu/...）
+├── rank             # 排名
+├── title            # 标题
+├── hot              # 热度值
+├── url              # 链接
+└── extra            # 扩展 JSON 字段
+```
+
+### 存储策略
+
+- **每次爬取 = 一个 batch**，完整记录当时各平台的快照
+- **WAL 模式**：读写不互斥，页面访问和后台爬取互不阻塞
+- **30 天自动清理**：每天凌晨 3:00 清理过期数据 + VACUUM
+
+---
+
+## TODO
 
 ### 高优先级（核心热搜）
 - [ ] **快手**：切换为移动端 API 或 SSR 方案
@@ -142,15 +192,16 @@ python app.py
 - [ ] **气象预警**：接入免费天气 API（不依赖和风 Key）
 - [ ] **地震速报**：添加 SSL verify=False 或换数据源
 - [ ] **历史上的今天**：换数据源
-- [ ] **新浪热榜**：合并到微博热搜（数据重复），或找可用接口
+- [ ] **新浪热榜**：合并到微博热搜或找可用接口
 
 ### 功能增强
+- [x] ~~定时自动刷新（后台任务）~~
+- [x] ~~数据历史存档~~
 - [ ] Docker 一键部署
-- [ ] 定时自动刷新（后台任务）
-- [ ] 数据历史存档
 - [ ] 暗色模式
 - [ ] 按关键词搜索/过滤
 - [ ] 移动端优化
+- [ ] 热榜趋势对比（基于历史数据）
 
 ---
 
@@ -158,7 +209,9 @@ python app.py
 
 ```
 hot-hub/
-├── app.py                 # FastAPI 入口
+├── app.py                 # FastAPI 入口 + 路由
+├── storage.py             # SQLite 结构化存储
+├── scheduler.py           # APScheduler 定时爬取调度
 ├── crawlers/
 │   ├── __init__.py
 │   ├── platforms.py       # 平台注册表 + 分类配置
@@ -166,13 +219,15 @@ hot-hub/
 │   ├── weibo.py           # 微博热搜
 │   ├── zhihu.py           # 知乎热榜
 │   ├── baidu.py           # 百度热搜
-│   ├── xiaohongshu.py     # 小红书（待修复）
+│   ├── xiaohongshu.py     # 小红书
 │   ├── douyin.py          # 抖音热榜
 │   └── toutiao.py         # 今日头条
 ├── templates/
-│   └── index.html         # 聚合展示页（分类版）
+│   └── index.html         # 聚合展示页
 ├── static/
 │   └── style.css          # 样式
+├── data/                  # SQLite 数据库（gitignore）
+│   └── hot_hub.db
 ├── requirements.txt
 └── README.md
 ```
@@ -180,7 +235,8 @@ hot-hub/
 ## ⚠️ 注意
 
 - 各平台接口随时可能变更，爬虫需要定期维护
-- 已做 5 分钟缓存，请勿高频刷新
+- 默认每 10 分钟爬取一次，可在启动时调整 `start_scheduler(interval_minutes=N)`
+- `data/` 目录已加入 `.gitignore`，数据库不会上传到 Git
 - 仅供个人学习使用
 
 ## License
