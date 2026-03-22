@@ -10,6 +10,7 @@ from typing import Optional
 from crawlers import weibo, zhihu, baidu, xiaohongshu, douyin, toutiao
 from crawlers.extra import FETCH_MAP
 from crawlers.platforms import PLATFORMS
+from crawlers.enricher import enrich_summaries
 from storage import init_db, save_batch, cleanup_old_data
 
 # 核心爬虫映射
@@ -51,6 +52,12 @@ async def fetch_all_and_save() -> dict:
     for key, data in zip(keys, results):
         if data:  # 只保存有数据的
             all_data[key] = data
+
+    # 补全摘要（仅对 top 条目）
+    try:
+        all_data = await enrich_summaries(all_data)
+    except Exception as e:
+        print(f"[scheduler] enrich failed: {e}")
 
     # 写入数据库
     batch_id = save_batch(all_data)

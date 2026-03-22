@@ -160,9 +160,9 @@ main {
 
 .hot-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
-  padding: 0.35rem 1rem;
+  padding: 0.45rem 1rem;
   transition: background 0.15s;
 }
 
@@ -211,6 +211,24 @@ main {
 
 .hot-title:hover {
   color: #667eea;
+}
+
+/* Summary */
+.hot-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.hot-summary {
+  font-size: 0.72rem;
+  color: #999;
+  line-height: 1.4;
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .hot-value {

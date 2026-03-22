@@ -51,6 +51,7 @@ def init_db():
                 title       TEXT NOT NULL,
                 hot         TEXT DEFAULT '',      -- 热度值
                 url         TEXT DEFAULT '',
+                summary     TEXT DEFAULT '',      -- 内容摘要
                 extra       TEXT DEFAULT '{}',    -- 预留 JSON 扩展字段
                 FOREIGN KEY (batch_id) REFERENCES fetch_batch(id)
             );
@@ -82,8 +83,8 @@ def save_batch(results: dict[str, list[dict]]) -> int:
             platform_count += 1
             for item in items:
                 db.execute(
-                    """INSERT INTO hot_item (batch_id, platform, rank, title, hot, url, extra)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    """INSERT INTO hot_item (batch_id, platform, rank, title, hot, url, summary, extra)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         batch_id,
                         platform,
@@ -91,8 +92,9 @@ def save_batch(results: dict[str, list[dict]]) -> int:
                         item.get("title", ""),
                         str(item.get("hot", "")),
                         item.get("url", ""),
+                        item.get("summary", ""),
                         json.dumps({k: v for k, v in item.items()
-                                    if k not in ("rank", "title", "hot", "url")},
+                                    if k not in ("rank", "title", "hot", "url", "summary")},
                                    ensure_ascii=False),
                     ),
                 )
@@ -133,6 +135,7 @@ def get_latest_batch():
                 "title": item["title"],
                 "hot": item["hot"],
                 "url": item["url"],
+                "summary": item["summary"] if "summary" in item.keys() else "",
             })
 
         return {

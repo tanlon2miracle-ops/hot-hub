@@ -31,11 +31,15 @@ async def fetch_bilibili():
     data = await _get_json("https://api.bilibili.com/x/web-interface/popular?ps=30&pn=1")
     items = []
     for i, v in enumerate(data.get("data", {}).get("list", [])[:30], 1):
+        desc = v.get("desc", "")
+        rcmd = v.get("rcmd_reason", {}).get("content", "")
+        summary = desc if desc and desc != v.get("title", "") else rcmd
         items.append({
             "rank": i,
             "title": v.get("title", ""),
             "hot": f'{v.get("stat", {}).get("view", 0) // 10000}万播放',
             "url": f'https://www.bilibili.com/video/{v.get("bvid", "")}',
+            "summary": summary,
         })
     return items
 
@@ -111,6 +115,7 @@ async def fetch_qq_news():
             "title": v.get("title", ""),
             "hot": v.get("hotEvent", {}).get("hotScore", ""),
             "url": v.get("url", v.get("surl", "")),
+            "summary": v.get("abstract", v.get("desc", "")),
         })
     return items
 

@@ -1,0 +1,45 @@
+"""
+后台摘要补全
+对没有自带 summary 的热点条目，异步抓取 URL 页面提取摘要
+仅对 Top N 条目执行，避免请求过多
+"""
+
+import asyncio
+from crawlers.summarizer import extract_summary
+
+# 每个平台最多补全前 N 条
+TOP_N = 5
+# 并发限制
+CONCURRENCY = 5
+
+
+async def enrich_summaries(platform_data: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """
+    为缺少 summary 的条目补全摘要
+    platform_data: {"weibo": [{rank, title, hot, url, summary?}, ...], ...}
+    """
+    sem = asyncio.Semaphore(CONCURRENCY)
+    tasks = []
+
+    for platform, items in platform_data.items():
+        for item in items[:TOP_N]:
+            if item.get("summary"):
+                continue  # 已有摘要
+            if not item.get("url"):
+                continue
+
+            async def _fill(it=item):
+                async with sem:
+                    try:
+                        summary = await extract_summary(it["url"])
+                        if summary:
+                            it["summary"] = summary
+                    except Exception:
+                        pass
+
+            tasks.append(_fill())
+
+    if tasks:
+        await asyncio.gather(*tasks)
+
+    return platform_data

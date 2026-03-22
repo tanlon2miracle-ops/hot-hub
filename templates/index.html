@@ -40,7 +40,12 @@
               {% for item in platform.entries[:20] %}
               <li class="hot-item {% if loop.index <= 3 %}hot-top{% endif %}">
                 <span class="hot-rank {% if loop.index <= 3 %}rank-top{% endif %}">{{ item.rank }}</span>
-                <a href="{{ item.url }}" target="_blank" rel="noopener" class="hot-title">{{ item.title }}</a>
+                <div class="hot-content">
+                  <a href="{{ item.url }}" target="_blank" rel="noopener" class="hot-title">{{ item.title }}</a>
+                  {% if item.summary %}
+                  <p class="hot-summary">{{ item.summary }}</p>
+                  {% endif %}
+                </div>
                 {% if item.hot %}
                 <span class="hot-value">{{ item.hot }}</span>
                 {% endif %}
