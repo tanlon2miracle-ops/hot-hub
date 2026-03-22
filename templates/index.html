@@ -33,12 +33,12 @@
           <div class="card-header">
             <span class="card-icon">{{ platform.icon }}</span>
             <h3>{{ platform.name }}</h3>
-            <span class="card-count">{{ platform.items | length }} 条</span>
+            <span class="card-count">{{ platform.entries | length }} 条</span>
           </div>
           <div class="card-body">
-            {% if platform.items %}
+            {% if platform.entries %}
             <ol class="hot-list">
-              {% for item in platform.items[:20] %}
+              {% for item in platform.entries[:20] %}
               <li class="hot-item {% if loop.index <= 3 %}hot-top{% endif %}">
                 <span class="hot-rank {% if loop.index <= 3 %}rank-top{% endif %}">{{ item.rank }}</span>
                 <a href="{{ item.url }}" target="_blank" rel="noopener" class="hot-title">{{ item.title }}</a>

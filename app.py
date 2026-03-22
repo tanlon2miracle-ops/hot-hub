@@ -53,6 +53,8 @@ async def _fetch_with_cache(name: str):
 
     try:
         data = await fetch_fn()
+        if not isinstance(data, list):
+            data = []
     except Exception as e:
         print(f"[{name}] 抓取失败: {e}")
         if cached:
@@ -81,7 +83,7 @@ async def index(request: Request):
             "key": key,
             "name": name,
             "icon": icon,
-            "items": data,
+            "entries": data if isinstance(data, list) else [],
         })
 
     categories = []
