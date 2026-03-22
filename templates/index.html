@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hot Hub — 全网热榜聚合</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>🔥 Hot Hub</h1>
+      <p class="subtitle">全网热榜聚合 · 更新于 {{ update_time }}</p>
+      <a href="/api/refresh" class="btn-refresh" onclick="this.textContent='刷新中...'; return true;">🔄 刷新数据</a>
+    </div>
+  </header>
+
+  <main class="grid">
+    {% for platform in platforms %}
+    <section class="card">
+      <div class="card-header">
+        <span class="card-icon">{{ platform.icon }}</span>
+        <h2>{{ platform.name }}</h2>
+        <span class="card-count">{{ platform.items | length }} 条</span>
+      </div>
+      <div class="card-body">
+        {% if platform.items %}
+        <ol class="hot-list">
+          {% for item in platform.items %}
+          <li class="hot-item {% if loop.index <= 3 %}hot-top{% endif %}">
+            <span class="hot-rank {% if loop.index <= 3 %}rank-top{% endif %}">{{ item.rank }}</span>
+            <a href="{{ item.url }}" target="_blank" rel="noopener" class="hot-title">{{ item.title }}</a>
+            {% if item.hot %}
+            <span class="hot-value">{{ item.hot }}</span>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ol>
+        {% else %}
+        <div class="empty">暂无数据，可能接口需要更新</div>
+        {% endif %}
+      </div>
+    </section>
+    {% endfor %}
+  </main>
+
+  <footer>
+    <p>Hot Hub · 仅供个人学习使用 · <a href="https://github.com/tanlon2miracle-ops/hot-hub" target="_blank">GitHub</a></p>
+  </footer>
+</body>
+</html>
