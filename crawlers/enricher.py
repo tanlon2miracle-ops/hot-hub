@@ -18,6 +18,12 @@ async def enrich_summaries(platform_data: dict) -> dict:
     为缺少 summary 的条目补全摘要
     platform_data: {"weibo": [{rank, title, hot, url, summary?}, ...], ...}
     """
+    # 搜索页 URL 不适合抓摘要（会拿到站点通用描述）
+    SKIP_DOMAINS = [
+        "search.bilibili.com", "s.weibo.com", "www.douyin.com/search",
+        "s.search.bilibili.com", "search.douyin.com",
+    ]
+
     sem = asyncio.Semaphore(CONCURRENCY)
     tasks = []
 
@@ -25,7 +31,11 @@ async def enrich_summaries(platform_data: dict) -> dict:
         for item in items[:TOP_N]:
             if item.get("summary"):
                 continue  # 已有摘要
-            if not item.get("url"):
+            url = item.get("url", "")
+            if not url:
+                continue
+            # 跳过搜索类 URL
+            if any(d in url for d in SKIP_DOMAINS):
                 continue
 
             async def _fill(it=item):
