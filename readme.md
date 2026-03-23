@@ -13,7 +13,7 @@
 - ✅ 空数据平台自动隐藏，只展示有效内容
 - ✅ 5 分钟内存缓存 + 数据库持久化双层架构
 - ✅ 分类导航 + 响应式网格布局
-- ✅ **⚠️ 敏感日历** — 前后 3 天内的敏感历史事件自动预警（75+ 事件覆盖全年）
+- ✅ **📰 News日历** — 敏感日期预警 + 历史上的今天，双 Tab 独立页面
 - ✅ 数据校验 — 自动过滤空标题和脏数据
 
 ## 技术栈
@@ -39,7 +39,7 @@ python app.py
 | 路径 | 说明 |
 |------|------|
 | `/` | 聚合热榜页面 |
-| `/alert` | ⚠️ 敏感日历（独立页面，前后 3 天预警） |
+| `/alert` | 📰 News日历（敏感日期 + 历史上的今天） |
 | `/api/refresh` | 手动触发爬取 |
 | `/api/status` | 调度器状态 |
 | `/api/history` | 爬取批次历史 |
@@ -60,7 +60,25 @@ python app.py
 | 🎬 影音 | AcFun、豆瓣电影、米游社 |
 | 🌐 国际 | Hacker News、GitHub Trending、TechCrunch、BBC、CNN、Urban Dictionary |
 | 😂 热梗 | B站热搜词、微博热梗、能不能好好说话 |
-| 📋 其他 | 知乎日报、地震速报、历史上的今天、IT之家喜加一、**⚠️ 敏感日历** |
+| 📋 其他 | 知乎日报、地震速报、历史上的今天、IT之家喜加一 |
+
+### 📰 News日历
+
+独立页面 `/alert`，双 Tab 设计：
+
+**⚠️ 敏感日期预警**（75+ 事件覆盖全年）
+- 按"今天 / 即将到来 / 刚过去"分组展示
+- 红 🔴 / 黄 🟡 / 灰 ⚪ 颜色区分紧急程度
+- 支持 `?days=7` 自定义预警范围
+
+![敏感日期预警](docs/news-calendar-sensitive.jpg)
+
+**📜 历史上的今天**（百度百科数据源）
+- 自动获取当天历史事件、名人诞辰/逝世
+- 支持按"事件 / 出生 / 逝世"分类过滤
+- 展示年份、距今年数、事件详情
+
+![历史上的今天](docs/news-calendar-history.jpg)
 
 ### ❌ 待修复（7 个）
 
@@ -99,6 +117,7 @@ hot-hub/
 │   ├── platforms.py       # 平台注册表 + 分类
 │   ├── extra.py           # 扩展平台爬虫
 │   ├── sensitive_dates.json # ⚠️ 敏感日历数据（75+ 事件）
+│   ├── history_today.py    # 📜 历史上的今天（百度百科 API）
 │   ├── enricher.py        # 内容摘要补全
 │   ├── weibo.py           # 微博
 │   ├── zhihu.py           # 知乎
@@ -106,7 +125,9 @@ hot-hub/
 │   ├── xiaohongshu.py     # 小红书（Playwright）
 │   ├── douyin.py          # 抖音
 │   └── toutiao.py         # 今日头条
-├── templates/index.html   # 页面模板
+├── templates/
+│   ├── index.html         # 热榜主页
+│   └── alert.html         # News日历页面
 ├── static/style.css       # 样式
 ├── data/hot_hub.db        # 数据库（gitignore）
 └── requirements.txt
