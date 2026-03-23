@@ -22,7 +22,7 @@ PLATFORMS = [
     ("kuaishou",      "快手热榜",      "🟠", "hot"),
     ("tieba",         "百度贴吧",      "💬", "hot"),
     ("qq_news",       "腾讯新闻",      "🐧", "hot"),
-    ("weibo_sina",    "新浪热榜",      "🌐", "hot"),
+    # ("weibo_sina",    "新浪热榜",      "🌐", "hot"),  # 与微博热搜重复
 
     # ---- 资讯 ----
     ("thepaper",      "澎湃新闻",      "📋", "news"),
@@ -41,14 +41,14 @@ PLATFORMS = [
     ("sspai",         "少数派",        "📐", "tech"),
     ("hellogithub",   "HelloGitHub",   "🐙", "tech"),
     ("nodeseek",      "NodeSeek",      "🌍", "tech"),
-    ("cto51",         "51CTO",         "🖥️", "tech"),
+    # ("cto51",         "51CTO",         "🖥️", "tech"),  # 页面解析失败，与 CSDN/掘金重复
 
     # ---- 社区 ----
     ("douban_group",  "豆瓣小组",      "🫘", "community"),
-    ("hupu",          "虎扑热帖",      "🏀", "community"),
-    ("coolapk",       "酷安热榜",      "🥒", "community"),
-    ("ngabbs",        "NGA热帖",       "🎮", "community"),
-    ("pojie52",       "吾爱破解",      "🔓", "community"),
+    # ("hupu",          "虎扑热帖",      "🏀", "community"),  # API 404，接口已变更
+    # ("coolapk",       "酷安热榜",      "🥒", "community"),  # 解析失败，受众窄
+    # ("ngabbs",        "NGA热帖",       "🎮", "community"),  # 403 反爬，价值低
+    # ("pojie52",       "吾爱破解",      "🔓", "community"),  # 解析空数据，受众窄
     ("hostloc",       "全球主机交流",   "🌏", "community"),
     ("jianshu",       "简书",          "📝", "community"),
     ("guokr",         "果壳",          "🥜", "community"),
@@ -56,12 +56,12 @@ PLATFORMS = [
     # ---- 影音游戏 ----
     ("acfun",         "AcFun",         "🅰️", "media"),
     ("douban_movie",  "豆瓣电影",      "🎬", "media"),
-    ("weread",        "微信读书",      "📖", "media"),
+    # ("weread",        "微信读书",      "📖", "media"),  # API 返回空数据
     ("miyoushe",      "米游社",        "🎯", "media"),
-    ("lol",           "英雄联盟",      "⚔️", "media"),
+    # ("lol",           "英雄联盟",      "⚔️", "media"),  # API 响应异常，受众窄
 
     # ---- 其他 ----
-    ("weatheralarm",  "气象预警",      "⛈️", "other"),
+    # ("weatheralarm",  "气象预警",      "⛈️", "other"),  # 需要 API Key
     ("earthquake",    "地震速报",      "🌍", "other"),
     ("history",       "历史上的今天",   "📅", "other"),
     ("zhihu_daily",   "知乎日报",      "📘", "other"),
