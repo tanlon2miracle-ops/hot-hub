@@ -133,7 +133,12 @@
       border-radius: 10px;
       background: #f0f0f0;
       color: #666;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
     }
+    .tag:hover { opacity: 0.8; transform: scale(1.05); }
+    .tag.selected { outline: 2px solid #333; outline-offset: 1px; }
     .tag.danger { background: #fde8e8; color: #c0392b; }
     .tag.warn { background: #fef3e2; color: #e67e22; }
     .alert-distance {
@@ -301,11 +306,16 @@
         <span class="l-past">⚪ 刚过去</span>
       </div>
 
+      <!-- Tag 筛选栏 -->
+      <div class="tag-filter-bar" style="display:flex; gap:0.4rem; flex-wrap:wrap; margin-bottom:1rem;">
+        <span class="tag selected" onclick="filterTag('all')" data-tag="all" style="background:#333;color:#fff;">全部</span>
+      </div>
+
       {% for group in event_groups %}
       <section class="alert-section">
         <h3>{{ group.label }}</h3>
         {% for ev in group.events %}
-        <div class="alert-card {{ ev.css_class }}">
+        <div class="alert-card {{ ev.css_class }}" data-tags="{{ ev.tags | join(',') }}">
           <div class="alert-date">
             <div class="month">{{ ev.month_str }}</div>
             <div class="day">{{ ev.day }}</div>
@@ -317,7 +327,7 @@
             {% endif %}
             <div class="alert-tags">
               {% for tag in ev.tags %}
-              <span class="tag {% if '高度敏感' in tag %}danger{% elif '重大灾难' in tag or '安全事故' in tag %}warn{% endif %}">{{ tag }}</span>
+              <span class="tag {% if '高度敏感' in tag %}danger{% elif '重大灾难' in tag or '安全事故' in tag %}warn{% endif %}" onclick="filterTag('{{ tag }}')">{{ tag }}</span>
               {% endfor %}
             </div>
           </div>
@@ -392,14 +402,53 @@
   }
 
   function filterHistory(type) {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.history-filter .filter-btn').forEach(b => b.classList.remove('active'));
     event.target.classList.add('active');
     document.querySelectorAll('.history-item').forEach(item => {
-      if (type === 'all' || item.dataset.type === type) {
-        item.style.display = '';
+      item.style.display = (type === 'all' || item.dataset.type === type) ? '' : 'none';
+    });
+  }
+
+  // 敏感日期 Tag 筛选
+  (function() {
+    // 收集所有 tag 并生成筛选按钮
+    const allTags = new Set();
+    document.querySelectorAll('.alert-card[data-tags]').forEach(card => {
+      card.dataset.tags.split(',').forEach(t => { if(t.trim()) allTags.add(t.trim()); });
+    });
+    const bar = document.querySelector('.tag-filter-bar');
+    if (bar && allTags.size > 0) {
+      allTags.forEach(tag => {
+        const span = document.createElement('span');
+        span.className = 'tag';
+        if (/高度敏感/.test(tag)) span.classList.add('danger');
+        else if (/重大灾难|安全事故/.test(tag)) span.classList.add('warn');
+        span.textContent = tag;
+        span.dataset.tag = tag;
+        span.onclick = () => filterTag(tag);
+        bar.appendChild(span);
+      });
+    }
+  })();
+
+  let _activeTag = 'all';
+  function filterTag(tag) {
+    _activeTag = tag;
+    document.querySelectorAll('.tag-filter-bar .tag').forEach(t => {
+      t.classList.toggle('selected', t.dataset.tag === tag);
+    });
+    document.querySelectorAll('.alert-card[data-tags]').forEach(card => {
+      if (tag === 'all') {
+        card.style.display = '';
       } else {
-        item.style.display = 'none';
+        const tags = card.dataset.tags.split(',').map(s => s.trim());
+        card.style.display = tags.includes(tag) ? '' : 'none';
       }
+    });
+    // 隐藏空分组
+    document.querySelectorAll('.alert-section').forEach(sec => {
+      const visible = sec.querySelectorAll('.alert-card[data-tags]:not([style*="display: none"])');
+      sec.style.display = visible.length > 0 ? '' : 'none';
     });
   }
   </script>
