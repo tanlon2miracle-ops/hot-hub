@@ -12,7 +12,7 @@
       <h1>🔥 Hot Hub</h1>
       <p class="subtitle">{{ total_platforms }} 个平台热榜聚合 · 更新于 {{ update_time }}</p>
       <div class="header-actions">
-        <a href="/api/refresh" class="btn-refresh" onclick="this.textContent='刷新中...'; return true;">🔄 刷新数据</a>
+        <button class="btn-refresh" id="refreshBtn" onclick="doRefresh()">🔄 刷新数据</button>
       </div>
       <!-- 分类快速跳转 -->
       <nav class="cat-nav">
@@ -63,5 +63,30 @@
   <footer>
     <p>Hot Hub · {{ total_platforms }} 个平台 · 仅供个人学习 · <a href="https://github.com/tanlon2miracle-ops/hot-hub" target="_blank">GitHub</a></p>
   </footer>
+
+  <script>
+  async function doRefresh() {
+    const btn = document.getElementById('refreshBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ 刷新中...';
+    btn.style.opacity = '0.7';
+    try {
+      const res = await fetch('/api/refresh');
+      const data = await res.json();
+      if (data.status === 'ok') {
+        btn.textContent = '✅ 刷新完成，正在重新加载...';
+        setTimeout(() => location.reload(), 800);
+      } else {
+        btn.textContent = '❌ 刷新失败，点击重试';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }
+    } catch (e) {
+      btn.textContent = '❌ 网络错误，点击重试';
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    }
+  }
+  </script>
 </body>
 </html>

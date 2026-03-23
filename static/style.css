@@ -46,9 +46,11 @@ header {
   background: rgba(255, 255, 255, 0.2);
   color: #fff;
   text-decoration: none;
+  border: none;
   border-radius: 20px;
   font-size: 0.8rem;
   font-weight: 600;
+  cursor: pointer;
   transition: background 0.2s;
 }
 
