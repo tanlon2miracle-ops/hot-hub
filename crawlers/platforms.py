@@ -73,6 +73,12 @@ PLATFORMS = [
     ("techcrunch",    "TechCrunch",    "🟩", "global"),
     ("bbc_news",      "BBC News",      "🔴", "global"),
     ("cnn",           "CNN",           "🔵", "global"),
+    ("urban_dict",    "Urban Dictionary","📖","global"),
+
+    # ---- 热梗 ----
+    ("bili_trending",  "B站热搜词",    "🔍", "meme"),
+    ("weibo_meme",     "微博热梗",     "😂", "meme"),
+    ("nbnhhsh",        "能不能好好说话","🗣️", "meme"),
 ]
 
 # 分类显示名
@@ -82,8 +88,9 @@ CATEGORY_NAMES = {
     "tech": "💻 科技",
     "community": "👥 社区",
     "media": "🎬 影音游戏",
-    "other": "📋 其他",
     "global": "🌐 国际",
+    "meme": "😂 热梗",
+    "other": "📋 其他",
 }
 
-CATEGORY_ORDER = ["hot", "news", "tech", "community", "media", "global", "other"]
+CATEGORY_ORDER = ["hot", "news", "tech", "community", "media", "global", "meme", "other"]

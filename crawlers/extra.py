@@ -772,6 +772,119 @@ async def fetch_cnn():
     return items
 
 
+# ========== B站热搜词 ==========
+async def fetch_bili_trending():
+    data = await _get_json("https://api.bilibili.com/x/web-interface/search/square?limit=30")
+    items = []
+    trending = data.get("data", {}).get("trending", {}).get("list", [])
+    for i, v in enumerate(trending[:30], 1):
+        keyword = v.get("keyword", v.get("show_name", ""))
+        items.append({
+            "rank": i,
+            "title": keyword,
+            "hot": "",
+            "url": f"https://search.bilibili.com/all?keyword={keyword}",
+        })
+    return items
+
+
+# ========== 微博热梗（幽默/搞笑类热搜）==========
+async def fetch_weibo_meme():
+    h = {**HEADERS, "Referer": "https://weibo.com/"}
+    data = await _get_json("https://weibo.com/ajax/statuses/hot_band", headers=h)
+    items = []
+    band = data.get("data", {}).get("band_list", [])
+    # 筛选幽默/搞笑/情感/综艺类别 + 带"好笑/搞笑/梗"标签的
+    meme_cats = {"幽默", "幽默,情感", "搞笑", "综艺", "作品衍生"}
+    for v in band:
+        cat = v.get("category", "")
+        word = v.get("word", "")
+        if not word:
+            continue
+        # 匹配分类或关键词
+        is_meme = cat in meme_cats or "梗" in word or "笑" in word or "搞笑" in cat
+        if is_meme:
+            detail = v.get("detail_tag", "")
+            items.append({
+                "rank": len(items) + 1,
+                "title": word,
+                "hot": v.get("num", ""),
+                "url": f"https://s.weibo.com/weibo?q=%23{word}%23",
+                "summary": f"[{cat}] {detail}" if detail else f"[{cat}]",
+            })
+        if len(items) >= 20:
+            break
+    return items
+
+
+# ========== 能不能好好说话（缩写翻译）==========
+async def fetch_nbnhhsh():
+    """抓当前B站热搜词中的缩写，翻译成人话"""
+    import httpx as _hx
+    # 先拿B站热搜
+    data = await _get_json("https://api.bilibili.com/x/web-interface/search/square?limit=30")
+    trending = data.get("data", {}).get("trending", {}).get("list", [])
+
+    # 筛选含纯字母缩写的词
+    import re
+    abbrs = []
+    for t in trending:
+        kw = t.get("keyword", "")
+        # 找其中的纯字母部分(>=2字母)
+        matches = re.findall(r'[a-zA-Z]{2,}', kw)
+        for m in matches:
+            if m.lower() not in ("the", "and", "for", "blg", "top", "fps", "cos", "pdd"):
+                abbrs.append(m)
+        if len(abbrs) >= 10:
+            break
+
+    if not abbrs:
+        # 用一些常见网络热梗缩写
+        abbrs = ["yyds", "xswl", "nsdd", "dbq", "zqsg", "nbcs", "ssfd", "plgg", "xjj", "awsl"]
+
+    items = []
+    async with _hx.AsyncClient(timeout=8, headers=HEADERS) as client:
+        for abbr in abbrs[:15]:
+            try:
+                r = await client.post(
+                    "https://lab.magiconch.com/api/nbnhhsh/guess",
+                    json={"text": abbr}
+                )
+                if r.status_code == 200:
+                    results = r.json()
+                    if results and results[0].get("trans"):
+                        trans = results[0]["trans"][:3]  # 最多3个翻译
+                        items.append({
+                            "rank": len(items) + 1,
+                            "title": abbr.upper(),
+                            "hot": "",
+                            "url": f"https://lab.magiconch.com/nbnhhsh/?q={abbr}",
+                            "summary": " / ".join(trans),
+                        })
+            except Exception:
+                continue
+            if len(items) >= 10:
+                break
+
+    return items
+
+
+# ========== Urban Dictionary ==========
+async def fetch_urban_dict():
+    data = await _get_json("https://api.urbandictionary.com/v0/words_of_the_day")
+    items = []
+    for i, v in enumerate(data.get("list", [])[:15], 1):
+        definition = v.get("definition", "").replace("[", "").replace("]", "")
+        items.append({
+            "rank": i,
+            "title": v.get("word", ""),
+            "hot": f'{v.get("thumbs_up", 0)} likes',
+            "url": v.get("permalink", ""),
+            "summary": definition[:200],
+        })
+    return items
+
+
 # ========== 调度表（带校验包装） ==========
 
 def _wrap(fn):
@@ -826,4 +939,8 @@ FETCH_MAP = {
     "techcrunch": _wrap(fetch_techcrunch),
     "bbc_news": _wrap(fetch_bbc_news),
     "cnn": _wrap(fetch_cnn),
+    "bili_trending": _wrap(fetch_bili_trending),
+    "weibo_meme": _wrap(fetch_weibo_meme),
+    "nbnhhsh": _wrap(fetch_nbnhhsh),
+    "urban_dict": _wrap(fetch_urban_dict),
 }
