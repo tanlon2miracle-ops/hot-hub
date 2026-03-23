@@ -190,10 +190,18 @@
         <div class="num">{{ stats.by_platform | length }}</div>
         <div class="label">涉及平台</div>
       </div>
+      <div class="stat-card">
+        <div class="num" style="color:#e74c3c">{{ stats.high_heat_count or 0 }}</div>
+        <div class="label">🔥 高热消失</div>
+      </div>
+      <div class="stat-card">
+        <div class="num" style="color:#e67e22">{{ stats.quick_delete_count or 0 }}</div>
+        <div class="label">⚡ 速删(&lt;30min)</div>
+      </div>
       {% for m in stats.by_mode %}
       <div class="stat-card">
         <div class="num" style="color: {% if m.detection_mode == 'flash' %}#e67e22{% else %}#3498db{% endif %}">{{ m.cnt }}</div>
-        <div class="label">{{ '⚡ 闪删' if m.detection_mode == 'flash' else '🔄 常规消失' }}</div>
+        <div class="label">{{ '⚡ 闪删检测' if m.detection_mode == 'flash' else '🔄 常规对比' }}</div>
       </div>
       {% endfor %}
     </div>
@@ -216,6 +224,9 @@
       <div class="v-rank">{{ item.rank_when_seen or '?' }}</div>
       <div class="v-info">
         <div class="v-title">
+          {% if item.heat_info %}
+          <span title="热度等级: {{ item.heat_info.label }}">{{ item.heat_info.icon }}</span>
+          {% endif %}
           {% if item.url %}
           <a href="{{ item.url }}" target="_blank" rel="noopener">{{ item.title }}</a>
           {% else %}
@@ -226,6 +237,7 @@
           {% set pname = platform_names.get(item.platform, (item.platform, '📋')) %}
           <span>{{ pname[1] }} {{ pname[0] }}</span>
           <span>消失于 {{ item.disappeared_at }}</span>
+          <span>⏱️ 曝光 {{ item.duration_display or '未知' }}</span>
           <span class="v-mode {% if item.detection_mode == 'flash' %}mode-flash{% else %}mode-diff{% endif %}">
             {{ '⚡闪删' if item.detection_mode == 'flash' else '🔄常规' }}
           </span>
