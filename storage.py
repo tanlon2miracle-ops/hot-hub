@@ -46,23 +46,29 @@ def init_db():
             CREATE TABLE IF NOT EXISTS hot_item (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 batch_id    INTEGER NOT NULL,
-                platform    TEXT NOT NULL,       -- 平台 key，如 weibo, zhihu
+                platform    TEXT NOT NULL,
                 rank        INTEGER,
                 title       TEXT NOT NULL,
-                hot         TEXT DEFAULT '',      -- 热度值
+                hot         TEXT DEFAULT '',
                 url         TEXT DEFAULT '',
-                summary     TEXT DEFAULT '',      -- 内容摘要
-                extra       TEXT DEFAULT '{}',    -- 预留 JSON 扩展字段
+                summary     TEXT DEFAULT '',
+                extra       TEXT DEFAULT '{}',
                 FOREIGN KEY (batch_id) REFERENCES fetch_batch(id)
             );
 
-            -- 索引：按平台+时间查询
+            -- 索引
             CREATE INDEX IF NOT EXISTS idx_item_platform ON hot_item(platform);
             CREATE INDEX IF NOT EXISTS idx_item_batch ON hot_item(batch_id);
         """)
 
+        # 自动迁移：如果旧表没有 summary 列，添加它
+        cols = [row[1] for row in db.execute("PRAGMA table_info(hot_item)").fetchall()]
+        if "summary" not in cols:
+            db.execute("ALTER TABLE hot_item ADD COLUMN summary TEXT DEFAULT ''")
+            print("[storage] Migrated: added summary column")
 
-def save_batch(results: dict[str, list[dict]]) -> int:
+
+def save_batch(results: dict) -> int:
     """
     保存一次完整爬取结果
     results: { "weibo": [{rank, title, hot, url}, ...], "zhihu": [...], ... }

@@ -13,7 +13,7 @@ TOP_N = 5
 CONCURRENCY = 5
 
 
-async def enrich_summaries(platform_data: dict[str, list[dict]]) -> dict[str, list[dict]]:
+async def enrich_summaries(platform_data: dict) -> dict:
     """
     为缺少 summary 的条目补全摘要
     platform_data: {"weibo": [{rank, title, hot, url, summary?}, ...], ...}

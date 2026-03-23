@@ -143,8 +143,13 @@ async def index(request: Request):
 async def refresh():
     """手动触发一次爬取并保存"""
     _cache.clear()
-    result = await fetch_all_and_save()
-    return {"status": "ok", "msg": "爬取完成并已存储", **result}
+    try:
+        result = await fetch_all_and_save()
+        return {"status": "ok", "msg": "爬取完成并已存储", **result}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "msg": f"爬取过程出错: {str(e)}"}
 
 
 @app.get("/api/status")
