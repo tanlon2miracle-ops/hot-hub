@@ -64,7 +64,7 @@ PLATFORMS = [
     # ("weatheralarm",  "气象预警",      "⛈️", "other"),  # 需要 API Key
     ("earthquake",    "地震速报",      "🌍", "other"),
     ("history",       "历史上的今天",   "📅", "other"),
-    ("sensitive_dates","⚠️ 敏感日历",    "🚨", "other"),
+    # ("sensitive_dates","⚠️ 敏感日历",    "🚨", "other"),  # 独立页面 /alert，不在主页展示
     ("zhihu_daily",   "知乎日报",      "📘", "other"),
     ("ithome_xjy",    "IT之家喜加一",  "🎁", "other"),
 

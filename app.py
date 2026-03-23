@@ -181,6 +181,85 @@ async def platform_history(platform: str, limit: int = 10):
     return {"platform": platform, "records": data}
 
 
+# ---------- 敏感日历独立页面 ----------
+
+@app.get("/alert", response_class=HTMLResponse)
+async def alert_page(request: Request, days: int = 3):
+    """⚠️ 敏感日历页面 — 展示前后 N 天内的敏感历史事件"""
+    import datetime, json, os
+
+    today = datetime.date.today()
+    json_path = os.path.join(os.path.dirname(__file__), "crawlers", "sensitive_dates.json")
+
+    nearby_events = []
+    if os.path.exists(json_path):
+        with open(json_path, "r", encoding="utf-8") as f:
+            db = json.load(f)
+        for ev in db.get("events", []):
+            mm, dd = ev["date"].split("-")
+            try:
+                ev_date = today.replace(month=int(mm), day=int(dd))
+            except ValueError:
+                continue
+            delta = (ev_date - today).days
+            if abs(delta) <= days:
+                months = ["", "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+                          "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+                if delta == 0:
+                    distance_str = "今天"
+                    css_class = "active"
+                    dist_class = "dist-today"
+                elif delta > 0:
+                    distance_str = f"{delta}天后"
+                    css_class = "upcoming"
+                    dist_class = "dist-near"
+                else:
+                    distance_str = f"{abs(delta)}天前"
+                    css_class = "past"
+                    dist_class = "dist-far"
+
+                years_ago = ""
+                if ev.get("year") and ev["year"] > 0:
+                    years_ago = str(today.year - ev["year"])
+
+                nearby_events.append({
+                    "title": ev["title"],
+                    "date": ev["date"],
+                    "year": ev.get("year") if ev.get("year", 0) > 0 else None,
+                    "years_ago": years_ago,
+                    "tags": ev.get("tags", []),
+                    "month_str": months[int(mm)],
+                    "day": dd,
+                    "delta": delta,
+                    "distance_str": distance_str,
+                    "css_class": css_class,
+                    "dist_class": dist_class,
+                })
+
+    # 按 delta 排序：今天 > 即将 > 刚过
+    nearby_events.sort(key=lambda x: (abs(x["delta"]), x["delta"]))
+
+    # 分组
+    event_groups = []
+    today_events = [e for e in nearby_events if e["delta"] == 0]
+    upcoming_events = [e for e in nearby_events if e["delta"] > 0]
+    past_events = [e for e in nearby_events if e["delta"] < 0]
+    if today_events:
+        event_groups.append({"label": "🔴 今天", "events": today_events})
+    if upcoming_events:
+        event_groups.append({"label": "🟡 即将到来", "events": upcoming_events})
+    if past_events:
+        event_groups.append({"label": "⚪ 刚过去", "events": past_events})
+
+    return templates.TemplateResponse("alert.html", {
+        "request": request,
+        "today": today.strftime("%Y年%m月%d日"),
+        "range_days": days,
+        "nearby_events": nearby_events,
+        "event_groups": event_groups,
+    })
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)

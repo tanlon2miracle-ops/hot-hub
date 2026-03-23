@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚠️ 敏感日历 — Hot Hub</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .alert-header {
+      background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    }
+    .alert-hero {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 2rem 1rem;
+    }
+    .alert-hero h2 {
+      font-size: 1.1rem;
+      font-weight: 400;
+      opacity: 0.9;
+      margin-bottom: 0.5rem;
+    }
+    .date-badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.2);
+      padding: 0.3rem 0.8rem;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+    }
+    .alert-main {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 1.5rem 1rem;
+    }
+    .alert-section {
+      margin-bottom: 2rem;
+    }
+    .alert-section h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 0.8rem;
+      padding-left: 0.5rem;
+      border-left: 4px solid #e74c3c;
+    }
+    .alert-card {
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 1px 8px rgba(0,0,0,0.05);
+      padding: 1rem 1.2rem;
+      margin-bottom: 0.8rem;
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+    }
+    .alert-card.active {
+      border-left: 4px solid #e74c3c;
+      background: #fff5f5;
+    }
+    .alert-card.upcoming {
+      border-left: 4px solid #f39c12;
+      background: #fffdf5;
+    }
+    .alert-card.past {
+      border-left: 4px solid #95a5a6;
+    }
+    .alert-date {
+      flex-shrink: 0;
+      width: 56px;
+      text-align: center;
+    }
+    .alert-date .month {
+      font-size: 0.7rem;
+      color: #999;
+      text-transform: uppercase;
+    }
+    .alert-date .day {
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: #333;
+      line-height: 1.2;
+    }
+    .alert-info {
+      flex: 1;
+    }
+    .alert-title {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #333;
+      margin-bottom: 0.3rem;
+    }
+    .alert-year {
+      font-size: 0.75rem;
+      color: #999;
+      margin-bottom: 0.4rem;
+    }
+    .alert-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+    }
+    .tag {
+      font-size: 0.65rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 10px;
+      background: #f0f0f0;
+      color: #666;
+    }
+    .tag.danger { background: #fde8e8; color: #c0392b; }
+    .tag.warn { background: #fef3e2; color: #e67e22; }
+    .alert-distance {
+      flex-shrink: 0;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.2rem 0.6rem;
+      border-radius: 12px;
+    }
+    .dist-today { background: #e74c3c; color: #fff; }
+    .dist-near { background: #f39c12; color: #fff; }
+    .dist-far { background: #ecf0f1; color: #999; }
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: #999;
+    }
+    .empty-state .emoji { font-size: 3rem; margin-bottom: 0.5rem; }
+    .back-link {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: 0.4rem 1rem;
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+      text-decoration: none;
+      border-radius: 20px;
+      font-size: 0.8rem;
+    }
+    .back-link:hover { background: rgba(255,255,255,0.35); }
+    .legend {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.75rem;
+      color: #999;
+    }
+    .legend span::before {
+      content: '';
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    .legend .l-active::before { background: #e74c3c; }
+    .legend .l-upcoming::before { background: #f39c12; }
+    .legend .l-past::before { background: #95a5a6; }
+  </style>
+</head>
+<body>
+  <header class="alert-header">
+    <div class="header-inner">
+      <h1>⚠️ 敏感日历</h1>
+      <p class="subtitle">视频/评论创作避雷参考 · 前后 {{ range_days }} 天预警</p>
+      <div class="date-badge">📅 {{ today }}</div>
+      <br>
+      <a href="/" class="back-link">← 返回热榜</a>
+    </div>
+  </header>
+
+  <div class="alert-main">
+    {% if nearby_events %}
+    <div class="legend">
+      <span class="l-active">🔴 当天</span>
+      <span class="l-upcoming">🟡 即将到来</span>
+      <span class="l-past">⚪ 刚过去</span>
+    </div>
+
+    {% for group in event_groups %}
+    <section class="alert-section">
+      <h3>{{ group.label }}</h3>
+      {% for ev in group.events %}
+      <div class="alert-card {{ ev.css_class }}">
+        <div class="alert-date">
+          <div class="month">{{ ev.month_str }}</div>
+          <div class="day">{{ ev.day }}</div>
+        </div>
+        <div class="alert-info">
+          <div class="alert-title">{{ ev.title }}</div>
+          {% if ev.year %}
+          <div class="alert-year">{{ ev.year }}年 · {{ ev.years_ago }}年前</div>
+          {% endif %}
+          <div class="alert-tags">
+            {% for tag in ev.tags %}
+            <span class="tag {% if '高度敏感' in tag %}danger{% elif '重大灾难' in tag or '安全事故' in tag %}warn{% endif %}">{{ tag }}</span>
+            {% endfor %}
+          </div>
+        </div>
+        <span class="alert-distance {{ ev.dist_class }}">{{ ev.distance_str }}</span>
+      </div>
+      {% endfor %}
+    </section>
+    {% endfor %}
+
+    {% else %}
+    <div class="empty-state">
+      <div class="emoji">✅</div>
+      <p>近期无敏感日期，放心创作！</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <footer>
+    <p>Hot Hub · 敏感日历 · 数据仅供参考，请结合实际判断</p>
+  </footer>
+</body>
+</html>
