@@ -26,6 +26,24 @@ async def _get_html(url, headers=None):
         return r.text
 
 
+def _validate_items(items: list) -> list:
+    """过滤无效条目：title 为空或纯空白的直接丢弃，重新编号 rank"""
+    valid = []
+    for item in items:
+        title = (item.get("title") or "").strip()
+        if not title:
+            continue
+        item["title"] = title
+        # url 清洗
+        url = (item.get("url") or "").strip()
+        item["url"] = url
+        valid.append(item)
+    # 重新编号
+    for i, item in enumerate(valid, 1):
+        item["rank"] = i
+    return valid
+
+
 # ========== B站 ==========
 async def fetch_bilibili():
     data = await _get_json("https://api.bilibili.com/x/web-interface/popular?ps=30&pn=1")
@@ -736,48 +754,58 @@ async def fetch_cnn():
     return items
 
 
-# ========== 调度表 ==========
+# ========== 调度表（带校验包装） ==========
+
+def _wrap(fn):
+    """包装爬虫函数，自动校验返回数据"""
+    async def wrapped():
+        items = await fn()
+        return _validate_items(items) if items else []
+    wrapped.__name__ = fn.__name__
+    return wrapped
+
+
 FETCH_MAP = {
-    "bilibili": fetch_bilibili,
-    "acfun": fetch_acfun,
-    "kuaishou": fetch_kuaishou,
-    "tieba": fetch_tieba,
-    "qq_news": fetch_qq_news,
-    "weibo_sina": fetch_weibo_sina,
-    "sina_news": fetch_sina_news,
-    "netease_news": fetch_netease_news,
-    "thepaper": fetch_thepaper,
-    "ifanr": fetch_ifanr,
-    "kr36": fetch_kr36,
-    "huxiu": fetch_huxiu,
-    "juejin": fetch_juejin,
-    "csdn": fetch_csdn,
-    "ithome": fetch_ithome,
-    "ithome_xjy": fetch_ithome_xjy,
-    "v2ex": fetch_v2ex,
-    "sspai": fetch_sspai,
-    "hellogithub": fetch_hellogithub,
-    "nodeseek": fetch_nodeseek,
-    "cto51": fetch_cto51,
-    "douban_group": fetch_douban_group,
-    "douban_movie": fetch_douban_movie,
-    "hupu": fetch_hupu,
-    "coolapk": fetch_coolapk,
-    "ngabbs": fetch_ngabbs,
-    "pojie52": fetch_pojie52,
-    "hostloc": fetch_hostloc,
-    "jianshu": fetch_jianshu,
-    "guokr": fetch_guokr,
-    "weread": fetch_weread,
-    "miyoushe": fetch_miyoushe,
-    "lol": fetch_lol,
-    "weatheralarm": fetch_weatheralarm,
-    "earthquake": fetch_earthquake,
-    "history": fetch_history,
-    "zhihu_daily": fetch_zhihu_daily,
-    "hackernews": fetch_hackernews,
-    "github_trend": fetch_github_trend,
-    "techcrunch": fetch_techcrunch,
-    "bbc_news": fetch_bbc_news,
-    "cnn": fetch_cnn,
+    "bilibili": _wrap(fetch_bilibili),
+    "acfun": _wrap(fetch_acfun),
+    "kuaishou": _wrap(fetch_kuaishou),
+    "tieba": _wrap(fetch_tieba),
+    "qq_news": _wrap(fetch_qq_news),
+    "weibo_sina": _wrap(fetch_weibo_sina),
+    "sina_news": _wrap(fetch_sina_news),
+    "netease_news": _wrap(fetch_netease_news),
+    "thepaper": _wrap(fetch_thepaper),
+    "ifanr": _wrap(fetch_ifanr),
+    "kr36": _wrap(fetch_kr36),
+    "huxiu": _wrap(fetch_huxiu),
+    "juejin": _wrap(fetch_juejin),
+    "csdn": _wrap(fetch_csdn),
+    "ithome": _wrap(fetch_ithome),
+    "ithome_xjy": _wrap(fetch_ithome_xjy),
+    "v2ex": _wrap(fetch_v2ex),
+    "sspai": _wrap(fetch_sspai),
+    "hellogithub": _wrap(fetch_hellogithub),
+    "nodeseek": _wrap(fetch_nodeseek),
+    "cto51": _wrap(fetch_cto51),
+    "douban_group": _wrap(fetch_douban_group),
+    "douban_movie": _wrap(fetch_douban_movie),
+    "hupu": _wrap(fetch_hupu),
+    "coolapk": _wrap(fetch_coolapk),
+    "ngabbs": _wrap(fetch_ngabbs),
+    "pojie52": _wrap(fetch_pojie52),
+    "hostloc": _wrap(fetch_hostloc),
+    "jianshu": _wrap(fetch_jianshu),
+    "guokr": _wrap(fetch_guokr),
+    "weread": _wrap(fetch_weread),
+    "miyoushe": _wrap(fetch_miyoushe),
+    "lol": _wrap(fetch_lol),
+    "weatheralarm": _wrap(fetch_weatheralarm),
+    "earthquake": _wrap(fetch_earthquake),
+    "history": _wrap(fetch_history),
+    "zhihu_daily": _wrap(fetch_zhihu_daily),
+    "hackernews": _wrap(fetch_hackernews),
+    "github_trend": _wrap(fetch_github_trend),
+    "techcrunch": _wrap(fetch_techcrunch),
+    "bbc_news": _wrap(fetch_bbc_news),
+    "cnn": _wrap(fetch_cnn),
 }

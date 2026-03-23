@@ -31,7 +31,19 @@ async def fetch() -> list[dict]:
                 "hot": hot_value,
                 "url": url,
             })
-        return items
+        return _validate(items)
 
     except Exception:
         return []
+
+
+def _validate(items):
+    valid = []
+    for it in items:
+        if not (it.get("title") or "").strip():
+            continue
+        it["title"] = it["title"].strip()
+        valid.append(it)
+    for i, it in enumerate(valid, 1):
+        it["rank"] = i
+    return valid

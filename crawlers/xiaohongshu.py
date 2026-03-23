@@ -80,10 +80,22 @@ async def fetch() -> list[dict]:
     try:
         items = await _fetch_with_playwright()
         if items:
-            return items
+            return _validate(items)
     except ImportError:
         print("[xiaohongshu] playwright 未安装，跳过")
     except Exception as e:
         print(f"[xiaohongshu] 错误: {e}")
 
     return []
+
+
+def _validate(items):
+    valid = []
+    for it in items:
+        if not (it.get("title") or "").strip():
+            continue
+        it["title"] = it["title"].strip()
+        valid.append(it)
+    for i, it in enumerate(valid, 1):
+        it["rank"] = i
+    return valid
