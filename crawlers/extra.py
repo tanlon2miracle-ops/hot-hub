@@ -641,6 +641,42 @@ async def fetch_history():
     return items
 
 
+# ========== 敏感日历（临近历史大事件预警） ==========
+async def fetch_sensitive_dates():
+    """读取 data/sensitive_dates.json，返回前后 3 天内的敏感历史事件"""
+    import datetime, json, os
+    today = datetime.date.today()
+    json_path = os.path.join(os.path.dirname(__file__), "sensitive_dates.json")
+    if not os.path.exists(json_path):
+        return []
+    with open(json_path, "r", encoding="utf-8") as f:
+        db = json.load(f)
+    events = db.get("events", [])
+    items = []
+    for ev in events:
+        mm, dd = ev["date"].split("-")
+        try:
+            ev_date = today.replace(month=int(mm), day=int(dd))
+        except ValueError:
+            continue
+        delta = abs((today - ev_date).days)
+        if delta <= 3:
+            year_str = f"{ev.get('year', '')}年" if ev.get("year") else ""
+            distance = "今天" if delta == 0 else (f"{delta}天后" if ev_date > today else f"{delta}天前")
+            tags_str = " ".join(f"[{t}]" for t in ev.get("tags", []))
+            items.append({
+                "rank": 0,
+                "title": f"⚠️ {ev['title']}（{year_str}{ev['date']}，{distance}）",
+                "hot": f"{tags_str}",
+                "url": "",
+            })
+    # 按距离排序：越近越靠前
+    items.sort(key=lambda x: x["title"])
+    for i, item in enumerate(items, 1):
+        item["rank"] = i
+    return items
+
+
 # ========== 知乎日报 ==========
 async def fetch_zhihu_daily():
     data = await _get_json("https://daily.zhihu.com/api/4/news/latest")
@@ -933,6 +969,7 @@ FETCH_MAP = {
     "weatheralarm": _wrap(fetch_weatheralarm),
     "earthquake": _wrap(fetch_earthquake),
     "history": _wrap(fetch_history),
+    "sensitive_dates": _wrap(fetch_sensitive_dates),
     "zhihu_daily": _wrap(fetch_zhihu_daily),
     "hackernews": _wrap(fetch_hackernews),
     "github_trend": _wrap(fetch_github_trend),

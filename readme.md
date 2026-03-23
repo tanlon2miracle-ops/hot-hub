@@ -58,7 +58,7 @@ python app.py
 | 🎬 影音 | AcFun、豆瓣电影、米游社 |
 | 🌐 国际 | Hacker News、GitHub Trending、TechCrunch、BBC、CNN、Urban Dictionary |
 | 😂 热梗 | B站热搜词、微博热梗、能不能好好说话 |
-| 📋 其他 | 知乎日报、地震速报、历史上的今天、IT之家喜加一 |
+| 📋 其他 | 知乎日报、地震速报、历史上的今天、IT之家喜加一、**⚠️ 敏感日历** |
 
 ### ❌ 待修复（7 个）
 
