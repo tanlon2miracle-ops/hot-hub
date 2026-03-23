@@ -21,6 +21,7 @@ from scheduler import (
     fetch_all_and_save, start_scheduler, stop_scheduler,
     get_scheduler_status, get_fetcher,
 )
+from censor import init_censor_db, get_censored_items, get_censor_stats
 
 
 # ---------- 生命周期 ----------
@@ -29,6 +30,7 @@ from scheduler import (
 async def lifespan(app: FastAPI):
     """启动时初始化 DB + 调度器，关闭时停止"""
     init_db()
+    init_censor_db()
     start_scheduler(interval_minutes=60)
     # 启动后立即执行一次爬取（如果数据库为空）
     latest = get_latest_batch()
@@ -179,6 +181,45 @@ async def platform_history(platform: str, limit: int = 10):
     """获取某个平台的历史数据"""
     data = get_platform_history(platform, limit)
     return {"platform": platform, "records": data}
+
+
+# ---------- 审查监测 API ----------
+
+@app.get("/api/censor")
+async def api_censor(hours: int = 24, platform: str = None, limit: int = 100):
+    """获取消失条目列表"""
+    items = get_censored_items(limit=limit, platform=platform, hours=hours)
+    stats = get_censor_stats(hours=hours)
+    return {"stats": stats, "items": items}
+
+
+# ---------- 审查监测页面 ----------
+
+@app.get("/censor", response_class=HTMLResponse)
+async def censor_page(request: Request, hours: int = 24):
+    """🔍 审查监测 — 消失的热搜"""
+    items = get_censored_items(limit=200, hours=hours)
+    stats = get_censor_stats(hours=hours)
+
+    # 按平台分组
+    platform_groups = {}
+    for item in items:
+        p = item["platform"]
+        if p not in platform_groups:
+            platform_groups[p] = []
+        platform_groups[p].append(item)
+
+    # 平台名称映射
+    platform_names = {p[0]: (p[1], p[2]) for p in PLATFORMS}
+
+    return templates.TemplateResponse("censor.html", {
+        "request": request,
+        "stats": stats,
+        "items": items,
+        "platform_groups": platform_groups,
+        "platform_names": platform_names,
+        "hours": hours,
+    })
 
 
 # ---------- News 日历独立页面 ----------

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🔍 审查监测 — Hot Hub</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .censor-header {
+      background: linear-gradient(135deg, #2c3e50 0%, #e74c3c 100%);
+    }
+    .censor-main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 1.5rem 1rem;
+    }
+    .back-link {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: 0.4rem 1rem;
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+      text-decoration: none;
+      border-radius: 20px;
+      font-size: 0.8rem;
+    }
+    .back-link:hover { background: rgba(255,255,255,0.35); }
+    /* 统计卡片 */
+    .stat-row {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .stat-card {
+      flex: 1;
+      min-width: 140px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+      padding: 1rem 1.2rem;
+      text-align: center;
+    }
+    .stat-card .num {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #e74c3c;
+    }
+    .stat-card .label {
+      font-size: 0.75rem;
+      color: #999;
+      margin-top: 0.3rem;
+    }
+    /* 平台排行 */
+    .platform-bar {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .p-badge {
+      padding: 0.3rem 0.8rem;
+      border-radius: 15px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid #eee;
+      background: #fff;
+    }
+    .p-badge.active { background: #e74c3c; color: #fff; border-color: #e74c3c; }
+    .p-badge:hover { border-color: #e74c3c; }
+    .p-badge .cnt { opacity: 0.8; font-weight: 400; }
+    /* 消失条目列表 */
+    .vanish-card {
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.05);
+      padding: 0.8rem 1rem;
+      margin-bottom: 0.6rem;
+      display: flex;
+      gap: 0.8rem;
+      align-items: center;
+      border-left: 3px solid #e74c3c;
+      transition: transform 0.15s;
+    }
+    .vanish-card:hover { transform: translateX(4px); }
+    .vanish-card.flash { border-left-color: #e67e22; }
+    .v-rank {
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #fde8e8;
+      color: #e74c3c;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+    }
+    .v-info { flex: 1; }
+    .v-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 0.2rem;
+    }
+    .v-title a { color: #333; text-decoration: none; }
+    .v-title a:hover { color: #e74c3c; }
+    .v-meta {
+      font-size: 0.7rem;
+      color: #999;
+      display: flex;
+      gap: 0.8rem;
+      flex-wrap: wrap;
+    }
+    .v-platform {
+      flex-shrink: 0;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 8px;
+      background: #f0f0f0;
+      color: #666;
+    }
+    .v-mode {
+      flex-shrink: 0;
+      font-size: 0.6rem;
+      padding: 0.1rem 0.4rem;
+      border-radius: 6px;
+    }
+    .mode-diff { background: #eee; color: #666; }
+    .mode-flash { background: #fef3e2; color: #e67e22; }
+    .v-hot {
+      flex-shrink: 0;
+      font-size: 0.7rem;
+      color: #e74c3c;
+      font-weight: 600;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: #999;
+    }
+    .empty-state .emoji { font-size: 3rem; margin-bottom: 0.5rem; }
+    .time-filter {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .time-btn {
+      padding: 0.3rem 0.8rem;
+      border: 1px solid #ddd;
+      border-radius: 15px;
+      background: #fff;
+      font-size: 0.75rem;
+      cursor: pointer;
+      text-decoration: none;
+      color: #333;
+    }
+    .time-btn.active { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+  </style>
+</head>
+<body>
+  <header class="censor-header">
+    <div class="header-inner">
+      <h1>🔍 审查监测</h1>
+      <p class="subtitle">消失的热搜 · 最近 {{ hours }} 小时</p>
+      <a href="/" class="back-link">← 返回热榜</a>
+    </div>
+  </header>
+
+  <div class="censor-main">
+    <!-- 时间筛选 -->
+    <div class="time-filter">
+      <a href="/censor?hours=1" class="time-btn {% if hours == 1 %}active{% endif %}">1小时</a>
+      <a href="/censor?hours=6" class="time-btn {% if hours == 6 %}active{% endif %}">6小时</a>
+      <a href="/censor?hours=24" class="time-btn {% if hours == 24 %}active{% endif %}">24小时</a>
+      <a href="/censor?hours=72" class="time-btn {% if hours == 72 %}active{% endif %}">3天</a>
+      <a href="/censor?hours=168" class="time-btn {% if hours == 168 %}active{% endif %}">7天</a>
+    </div>
+
+    <!-- 统计概览 -->
+    <div class="stat-row">
+      <div class="stat-card">
+        <div class="num">{{ stats.total }}</div>
+        <div class="label">消失条目</div>
+      </div>
+      <div class="stat-card">
+        <div class="num">{{ stats.by_platform | length }}</div>
+        <div class="label">涉及平台</div>
+      </div>
+      {% for m in stats.by_mode %}
+      <div class="stat-card">
+        <div class="num" style="color: {% if m.detection_mode == 'flash' %}#e67e22{% else %}#3498db{% endif %}">{{ m.cnt }}</div>
+        <div class="label">{{ '⚡ 闪删' if m.detection_mode == 'flash' else '🔄 常规消失' }}</div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- 平台筛选 -->
+    {% if stats.by_platform %}
+    <div class="platform-bar">
+      <span class="p-badge active" onclick="filterPlatform('all')">全部 <span class="cnt">({{ stats.total }})</span></span>
+      {% for p in stats.by_platform %}
+      {% set pname = platform_names.get(p.platform, (p.platform, '📋')) %}
+      <span class="p-badge" onclick="filterPlatform('{{ p.platform }}')">{{ pname[1] }} {{ pname[0] }} <span class="cnt">({{ p.cnt }})</span></span>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- 消失条目列表 -->
+    {% if items %}
+    {% for item in items %}
+    <div class="vanish-card {% if item.detection_mode == 'flash' %}flash{% endif %}" data-platform="{{ item.platform }}">
+      <div class="v-rank">{{ item.rank_when_seen or '?' }}</div>
+      <div class="v-info">
+        <div class="v-title">
+          {% if item.url %}
+          <a href="{{ item.url }}" target="_blank" rel="noopener">{{ item.title }}</a>
+          {% else %}
+          {{ item.title }}
+          {% endif %}
+        </div>
+        <div class="v-meta">
+          {% set pname = platform_names.get(item.platform, (item.platform, '📋')) %}
+          <span>{{ pname[1] }} {{ pname[0] }}</span>
+          <span>消失于 {{ item.disappeared_at }}</span>
+          <span class="v-mode {% if item.detection_mode == 'flash' %}mode-flash{% else %}mode-diff{% endif %}">
+            {{ '⚡闪删' if item.detection_mode == 'flash' else '🔄常规' }}
+          </span>
+        </div>
+      </div>
+      {% if item.hot %}
+      <div class="v-hot">🔥 {{ item.hot }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state">
+      <div class="emoji">✅</div>
+      <p>最近 {{ hours }} 小时内暂无检测到消失的热搜</p>
+      <p style="font-size:0.8rem; margin-top:0.5rem;">系统每小时全量对比 + 每5分钟监测闪删大户</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <footer>
+    <p>Hot Hub · 审查监测 · 数据仅供参考，消失原因可能包括：正常降温、平台调整、审查删除</p>
+  </footer>
+
+  <script>
+  function filterPlatform(platform) {
+    document.querySelectorAll('.p-badge').forEach(b => b.classList.remove('active'));
+    event.target.closest('.p-badge').classList.add('active');
+    document.querySelectorAll('.vanish-card').forEach(card => {
+      if (platform === 'all' || card.dataset.platform === platform) {
+        card.style.display = '';
+      } else {
+        card.style.display = 'none';
+      }
+    });
+  }
+  </script>
+</body>
+</html>

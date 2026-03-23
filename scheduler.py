@@ -12,6 +12,11 @@ from crawlers.extra import FETCH_MAP
 from crawlers.platforms import PLATFORMS
 from crawlers.enricher import enrich_summaries
 from storage import init_db, save_batch, cleanup_old_data
+from censor import (
+    init_censor_db, diff_batches,
+    save_flash_snapshot, diff_flash_snapshots,
+    cleanup_flash_snapshots, FLASH_DELETE_TARGETS,
+)
 
 # 核心爬虫映射
 _CORE_FETCHERS = {
@@ -61,6 +66,15 @@ async def fetch_all_and_save() -> dict:
 
     # 写入数据库
     batch_id = save_batch(all_data)
+
+    # ---- 审查监测：Diff 对比 ----
+    try:
+        vanished = diff_batches(batch_id)
+        if vanished:
+            print(f"[censor] {len(vanished)} items disappeared in batch #{batch_id}")
+    except Exception as e:
+        print(f"[censor] diff error: {e}")
+
     elapsed = time.time() - t0
     print(f"[scheduler] Batch #{batch_id} done in {elapsed:.1f}s, "
           f"{len(all_data)}/{len(keys)} platforms")
@@ -70,6 +84,24 @@ async def fetch_all_and_save() -> dict:
         "platforms": len(all_data),
         "elapsed": round(elapsed, 1),
     }
+
+
+# ========== 高频闪删监测 ==========
+
+async def flash_monitor():
+    """高频快照 + diff（闪删大户专用，5-10分钟一次）"""
+    for platform in FLASH_DELETE_TARGETS:
+        try:
+            data = await fetch_one(platform)
+            if data:
+                save_flash_snapshot(platform, data)
+                vanished = diff_flash_snapshots(platform)
+                if vanished:
+                    print(f"[flash] ⚡ {platform}: {len(vanished)} items flash-deleted!")
+                    for v in vanished[:3]:
+                        print(f"  🗑️ [{v['rank_when_seen']}] {v['title']}")
+        except Exception as e:
+            print(f"[flash] {platform} error: {e}")
 
 
 # ========== APScheduler 集成 ==========
@@ -105,7 +137,16 @@ def start_scheduler(interval_minutes: int = 10):
         replace_existing=True,
     )
 
-    # 每天凌晨 3 点清理 30 天前的旧数据
+    # 高频闪删监测：每 5 分钟
+    _scheduler.add_job(
+        flash_monitor,
+        IntervalTrigger(minutes=5),
+        id="flash_monitor",
+        name="闪删监测（微博/知乎/百度/抖音/头条）",
+        replace_existing=True,
+    )
+
+    # 每天凌晨 3 点清理旧数据
     _scheduler.add_job(
         _cleanup_job,
         CronTrigger(hour=3, minute=0),
@@ -146,3 +187,4 @@ def get_scheduler_status() -> dict:
 async def _cleanup_job():
     """清理任务包装"""
     cleanup_old_data(keep_days=30)
+    cleanup_flash_snapshots(keep_hours=48)
