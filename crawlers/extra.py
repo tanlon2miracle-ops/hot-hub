@@ -526,13 +526,31 @@ async def fetch_weread():
 async def fetch_miyoushe():
     data = await _get_json("https://bbs-api.mihoyo.com/post/wapi/getForumPostList?forum_id=1&gids=2&is_good=false&is_hot=true&page_size=20&sort_type=1")
     items = []
+    import re
     for i, v in enumerate(data.get("data", {}).get("list", [])[:20], 1):
         post = v.get("post", {})
+        subject = post.get("subject", "")
+        # 清理米游社富文本颜色标记
+        # 格式: s0¹ / s0² / ss2² / ss 等 — s{1,2} + 可选数字 + 上标数字
+        # 这些标记在每个字符前作为样式控制
+        subject = re.sub(r's{1,2}\d*[⁰¹²³⁴⁵⁶⁷⁸⁹]+', '', subject)
+        # 清理剩余的独立 ss 标记（没有上标数字的情况）
+        subject = re.sub(r'(?<=[\u4e00-\u9fff])ss(?=[\u4e00-\u9fff])', '', subject)
+        subject = re.sub(r'^ss(?=[\u4e00-\u9fff])', '', subject)
+        subject = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', subject)
+        subject = subject.strip()
+        content = post.get("content", "").strip()
+        summary = re.sub(r'[\x00-\x1f]', '', content)[:100] if content else ""
+        # 同样清理 summary 里的标记
+        summary = re.sub(r's{1,2}\d*[⁰¹²³⁴⁵⁶⁷⁸⁹]+', '', summary)
+        summary = re.sub(r'(?<=[\u4e00-\u9fff])ss(?=[\u4e00-\u9fff\w])', '', summary)
+        summary = re.sub(r'(?<=[\u4e00-\u9fff])sss(?=[A-Z])', '', summary)
         items.append({
             "rank": i,
-            "title": post.get("subject", ""),
+            "title": subject,
             "hot": "",
             "url": f'https://www.miyoushe.com/ys/article/{post.get("post_id", "")}' if post.get("post_id") else "",
+            "summary": summary,
         })
     return items
 
