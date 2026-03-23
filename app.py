@@ -181,16 +181,18 @@ async def platform_history(platform: str, limit: int = 10):
     return {"platform": platform, "records": data}
 
 
-# ---------- 敏感日历独立页面 ----------
+# ---------- News 日历独立页面 ----------
 
 @app.get("/alert", response_class=HTMLResponse)
 async def alert_page(request: Request, days: int = 3):
-    """⚠️ 敏感日历页面 — 展示前后 N 天内的敏感历史事件"""
+    """📰 News 日历 — 敏感日期预警 + 历史上的今天"""
     import datetime, json, os
+    from crawlers.history_today import fetch_today
 
     today = datetime.date.today()
     json_path = os.path.join(os.path.dirname(__file__), "crawlers", "sensitive_dates.json")
 
+    # ---- 敏感日期 ----
     nearby_events = []
     if os.path.exists(json_path):
         with open(json_path, "r", encoding="utf-8") as f:
@@ -251,12 +253,22 @@ async def alert_page(request: Request, days: int = 3):
     if past_events:
         event_groups.append({"label": "⚪ 刚过去", "events": past_events})
 
+    # ---- 历史上的今天 ----
+    history_events = []
+    try:
+        history_events = await fetch_today()
+    except Exception as e:
+        print(f"[history_today] 获取失败: {e}")
+
     return templates.TemplateResponse("alert.html", {
         "request": request,
         "today": today.strftime("%Y年%m月%d日"),
+        "today_month": today.month,
+        "today_day": today.day,
         "range_days": days,
         "nearby_events": nearby_events,
         "event_groups": event_groups,
+        "history_events": history_events,
     })
 
 

@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>⚠️ 敏感日历 — Hot Hub</title>
+  <title>📰 News日历 — Hot Hub</title>
   <link rel="stylesheet" href="/static/style.css">
   <style>
     .alert-header {
-      background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+      background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
     }
     .alert-hero {
       max-width: 800px;
@@ -33,6 +33,34 @@
       margin: 0 auto;
       padding: 1.5rem 1rem;
     }
+    /* Tab 切换 */
+    .tab-bar {
+      display: flex;
+      gap: 0;
+      margin-bottom: 1.5rem;
+      border-bottom: 2px solid #eee;
+    }
+    .tab-btn {
+      padding: 0.6rem 1.2rem;
+      border: none;
+      background: none;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #999;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      margin-bottom: -2px;
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      color: #333;
+      border-bottom-color: #3498db;
+    }
+    .tab-btn:hover { color: #333; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* 敏感日期样式 */
     .alert-section {
       margin-bottom: 2rem;
     }
@@ -154,63 +182,226 @@
     .legend .l-active::before { background: #e74c3c; }
     .legend .l-upcoming::before { background: #f39c12; }
     .legend .l-past::before { background: #95a5a6; }
+
+    /* 历史上的今天 */
+    .history-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .history-item {
+      display: flex;
+      gap: 0.8rem;
+      align-items: flex-start;
+      padding: 0.8rem 1rem;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+      margin-bottom: 0.6rem;
+      transition: transform 0.15s;
+    }
+    .history-item:hover {
+      transform: translateX(4px);
+    }
+    .history-year {
+      flex-shrink: 0;
+      min-width: 50px;
+      text-align: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #3498db;
+      padding-top: 2px;
+    }
+    .history-year .years-ago {
+      font-size: 0.6rem;
+      color: #aaa;
+      font-weight: 400;
+    }
+    .history-icon {
+      flex-shrink: 0;
+      font-size: 1.1rem;
+    }
+    .history-content {
+      flex: 1;
+    }
+    .history-content .h-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 0.2rem;
+    }
+    .history-content .h-title a {
+      color: #333;
+      text-decoration: none;
+    }
+    .history-content .h-title a:hover {
+      color: #3498db;
+    }
+    .history-content .h-desc {
+      font-size: 0.75rem;
+      color: #888;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .history-filter {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    .filter-btn {
+      padding: 0.3rem 0.8rem;
+      border: 1px solid #ddd;
+      border-radius: 15px;
+      background: #fff;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .filter-btn.active {
+      background: #3498db;
+      color: #fff;
+      border-color: #3498db;
+    }
+    .filter-btn:hover { border-color: #3498db; }
+    .history-count {
+      font-size: 0.75rem;
+      color: #999;
+      margin-bottom: 1rem;
+    }
   </style>
 </head>
 <body>
   <header class="alert-header">
     <div class="header-inner">
-      <h1>⚠️ 敏感日历</h1>
-      <p class="subtitle">视频/评论创作避雷参考 · 前后 {{ range_days }} 天预警</p>
-      <div class="date-badge">📅 {{ today }}</div>
+      <h1>📰 News日历</h1>
+      <p class="subtitle">敏感避雷 + 历史上的今天 · {{ today }}</p>
+      <div class="date-badge">📅 {{ today_month }}月{{ today_day }}日</div>
       <br>
       <a href="/" class="back-link">← 返回热榜</a>
     </div>
   </header>
 
   <div class="alert-main">
-    {% if nearby_events %}
-    <div class="legend">
-      <span class="l-active">🔴 当天</span>
-      <span class="l-upcoming">🟡 即将到来</span>
-      <span class="l-past">⚪ 刚过去</span>
+    <!-- Tab 切换 -->
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="switchTab('sensitive')">⚠️ 敏感日期 ({{ nearby_events|length }})</button>
+      <button class="tab-btn" onclick="switchTab('history')">📜 历史上的今天 ({{ history_events|length }})</button>
     </div>
 
-    {% for group in event_groups %}
-    <section class="alert-section">
-      <h3>{{ group.label }}</h3>
-      {% for ev in group.events %}
-      <div class="alert-card {{ ev.css_class }}">
-        <div class="alert-date">
-          <div class="month">{{ ev.month_str }}</div>
-          <div class="day">{{ ev.day }}</div>
-        </div>
-        <div class="alert-info">
-          <div class="alert-title">{{ ev.title }}</div>
-          {% if ev.year %}
-          <div class="alert-year">{{ ev.year }}年 · {{ ev.years_ago }}年前</div>
-          {% endif %}
-          <div class="alert-tags">
-            {% for tag in ev.tags %}
-            <span class="tag {% if '高度敏感' in tag %}danger{% elif '重大灾难' in tag or '安全事故' in tag %}warn{% endif %}">{{ tag }}</span>
-            {% endfor %}
-          </div>
-        </div>
-        <span class="alert-distance {{ ev.dist_class }}">{{ ev.distance_str }}</span>
+    <!-- 敏感日期 Tab -->
+    <div id="tab-sensitive" class="tab-panel active">
+      {% if nearby_events %}
+      <div class="legend">
+        <span class="l-active">🔴 当天</span>
+        <span class="l-upcoming">🟡 即将到来</span>
+        <span class="l-past">⚪ 刚过去</span>
       </div>
-      {% endfor %}
-    </section>
-    {% endfor %}
 
-    {% else %}
-    <div class="empty-state">
-      <div class="emoji">✅</div>
-      <p>近期无敏感日期，放心创作！</p>
+      {% for group in event_groups %}
+      <section class="alert-section">
+        <h3>{{ group.label }}</h3>
+        {% for ev in group.events %}
+        <div class="alert-card {{ ev.css_class }}">
+          <div class="alert-date">
+            <div class="month">{{ ev.month_str }}</div>
+            <div class="day">{{ ev.day }}</div>
+          </div>
+          <div class="alert-info">
+            <div class="alert-title">{{ ev.title }}</div>
+            {% if ev.year %}
+            <div class="alert-year">{{ ev.year }}年 · {{ ev.years_ago }}年前</div>
+            {% endif %}
+            <div class="alert-tags">
+              {% for tag in ev.tags %}
+              <span class="tag {% if '高度敏感' in tag %}danger{% elif '重大灾难' in tag or '安全事故' in tag %}warn{% endif %}">{{ tag }}</span>
+              {% endfor %}
+            </div>
+          </div>
+          <span class="alert-distance {{ ev.dist_class }}">{{ ev.distance_str }}</span>
+        </div>
+        {% endfor %}
+      </section>
+      {% endfor %}
+
+      {% else %}
+      <div class="empty-state">
+        <div class="emoji">✅</div>
+        <p>近 {{ range_days }} 天内无敏感日期，放心创作！</p>
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
+
+    <!-- 历史上的今天 Tab -->
+    <div id="tab-history" class="tab-panel">
+      {% if history_events %}
+      <div class="history-filter">
+        <button class="filter-btn active" onclick="filterHistory('all')">全部</button>
+        <button class="filter-btn" onclick="filterHistory('event')">📜 事件</button>
+        <button class="filter-btn" onclick="filterHistory('birth')">👶 出生</button>
+        <button class="filter-btn" onclick="filterHistory('death')">✝️ 逝世</button>
+      </div>
+      <div class="history-count">共 <strong>{{ history_events|length }}</strong> 条历史事件</div>
+      <ul class="history-list">
+        {% for ev in history_events %}
+        <li class="history-item" data-type="{{ ev.type }}">
+          <div class="history-year">
+            {{ ev.year }}年
+            {% if ev.year %}
+            <div class="years-ago">{{ 2026 - (ev.year|int) if ev.year|int > 0 else '' }}年前</div>
+            {% endif %}
+          </div>
+          <div class="history-icon">{{ ev.type_icon }}</div>
+          <div class="history-content">
+            <div class="h-title">
+              {% if ev.link %}
+              <a href="{{ ev.link }}" target="_blank" rel="noopener">{{ ev.title }}</a>
+              {% else %}
+              {{ ev.title }}
+              {% endif %}
+            </div>
+            {% if ev.desc %}
+            <div class="h-desc">{{ ev.desc }}</div>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="empty-state">
+        <div class="emoji">📭</div>
+        <p>暂无数据，稍后再试</p>
+      </div>
+      {% endif %}
+    </div>
   </div>
 
   <footer>
-    <p>Hot Hub · 敏感日历 · 数据仅供参考，请结合实际判断</p>
+    <p>Hot Hub · News日历 · 数据仅供参考</p>
   </footer>
+
+  <script>
+  function switchTab(name) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    event.target.classList.add('active');
+  }
+
+  function filterHistory(type) {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+    document.querySelectorAll('.history-item').forEach(item => {
+      if (type === 'all' || item.dataset.type === type) {
+        item.style.display = '';
+      } else {
+        item.style.display = 'none';
+      }
+    });
+  }
+  </script>
 </body>
 </html>
