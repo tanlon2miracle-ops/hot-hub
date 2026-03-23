@@ -195,14 +195,15 @@ async def fetch_ifanr():
 
 # ========== 36氪 ==========
 async def fetch_kr36():
-    data = await _get_json("https://gateway.36kr.com/api/mis/nav/home/nav/rank/hot")
+    data = await _get_json("https://36kr.com/api/newsflash?per_page=30")
     items = []
-    for i, v in enumerate(data.get("data", {}).get("hotRankList", [])[:30], 1):
+    for i, v in enumerate(data.get("data", {}).get("items", [])[:30], 1):
         items.append({
             "rank": i,
-            "title": v.get("templateMaterial", {}).get("widgetTitle", ""),
-            "hot": v.get("templateMaterial", {}).get("statRead", ""),
-            "url": f'https://36kr.com/p/{v.get("itemId", "")}' if v.get("itemId") else "",
+            "title": v.get("title", ""),
+            "hot": "",
+            "url": f'https://36kr.com/newsflashes/{v.get("id", "")}' if v.get("id") else "",
+            "summary": v.get("description", "")[:200],
         })
     return items
 
@@ -255,29 +256,31 @@ async def fetch_csdn():
 
 # ========== IT之家 ==========
 async def fetch_ithome():
-    html = await _get_html("https://www.ithome.com/")
-    soup = BeautifulSoup(html, "lxml")
+    data = await _get_json("https://m.ithome.com/api/news/newslistpageget?categoryid=0&dt=0&startid=0")
     items = []
-    hot_list = soup.select("#rank ul.hot-list li a") or soup.select(".hot-list li a")
-    for i, a in enumerate(hot_list[:30], 1):
-        title = a.get_text(strip=True)
-        href = a.get("href", "")
-        if title:
-            items.append({"rank": i, "title": title, "hot": "", "url": href})
+    for i, v in enumerate(data.get("Result", [])[:30], 1):
+        items.append({
+            "rank": i,
+            "title": v.get("title", ""),
+            "hot": "",
+            "url": v.get("slink", v.get("url", "")),
+            "summary": v.get("description", "")[:200],
+        })
     return items
 
 
 # ========== IT之家喜加一 ==========
 async def fetch_ithome_xjy():
-    html = await _get_html("https://www.ithome.com/tag/xijiayi")
-    soup = BeautifulSoup(html, "lxml")
+    data = await _get_json("https://m.ithome.com/api/news/newslistpageget?categoryid=39&dt=0&startid=0")
     items = []
-    posts = soup.select(".ul_list li .title a") or soup.select(".post_list .title a")
-    for i, a in enumerate(posts[:20], 1):
-        title = a.get_text(strip=True)
-        href = a.get("href", "")
-        if title:
-            items.append({"rank": i, "title": title, "hot": "", "url": href})
+    for i, v in enumerate(data.get("Result", [])[:20], 1):
+        items.append({
+            "rank": i,
+            "title": v.get("title", ""),
+            "hot": "",
+            "url": v.get("slink", v.get("url", "")),
+            "summary": v.get("description", "")[:200],
+        })
     return items
 
 
@@ -539,7 +542,32 @@ async def fetch_weatheralarm():
 
 # ========== 地震速报 ==========
 async def fetch_earthquake():
-    data = await _get_json("https://www.ceic.ac.cn/ajax/google?rand=0&num=20")
+    # 中国地震台网 CENC 公开数据
+    h = {**HEADERS}
+    async with httpx.AsyncClient(timeout=10, headers=h, verify=False, follow_redirects=True) as c:
+        # 优先用 CENC 新版 API
+        try:
+            r = await c.get("https://news.ceic.ac.cn/index.html?time=2")
+            # 回退到老 API
+        except Exception:
+            pass
+        r = await c.get("https://www.ceic.ac.cn/ajax/google?rand=0&num=20")
+        if r.status_code != 200:
+            # 尝试 USGS 作为后备
+            r = await c.get("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson")
+            r.raise_for_status()
+            data = r.json()
+            items = []
+            for i, f in enumerate(data.get("features", [])[:20], 1):
+                p = f.get("properties", {})
+                items.append({
+                    "rank": i,
+                    "title": p.get("title", f'M{p.get("mag","")} {p.get("place","")}'),
+                    "hot": p.get("time", ""),
+                    "url": p.get("url", ""),
+                })
+            return items
+        data = r.json()
     items = []
     for i, v in enumerate(data[:20], 1):
         items.append({
@@ -556,12 +584,21 @@ async def fetch_history():
     import datetime
     today = datetime.date.today()
     data = await _get_json(f"https://baike.baidu.com/cms/home/eventsOnHistory/{today.month:02d}.json")
+    # 新格式: {"03": {"0301": [...], "0302": [...]}}
     key = f"{today.month:02d}{today.day:02d}"
+    month_key = f"{today.month:02d}"
+    month_data = data.get(month_key, data)
+    if isinstance(month_data, dict):
+        events = month_data.get(key, [])
+    else:
+        events = data.get(key, [])
     items = []
-    for i, v in enumerate(data.get(key, [])[:20], 1):
+    for i, v in enumerate(events[:20], 1):
+        import re
+        title = re.sub(r'<[^>]+>', '', v.get("title", ""))  # 去掉 HTML 标签
         items.append({
             "rank": i,
-            "title": v.get("title", ""),
+            "title": title,
             "hot": v.get("year", ""),
             "url": v.get("link", ""),
         })
@@ -570,13 +607,13 @@ async def fetch_history():
 
 # ========== 知乎日报 ==========
 async def fetch_zhihu_daily():
-    data = await _get_json("https://news-at.zhihu.com/api/4/news/latest")
+    data = await _get_json("https://daily.zhihu.com/api/4/news/latest")
     items = []
     for i, v in enumerate(data.get("stories", [])[:20], 1):
         items.append({
             "rank": i,
             "title": v.get("title", ""),
-            "hot": "",
+            "hot": v.get("hint", ""),
             "url": v.get("url", f'https://daily.zhihu.com/story/{v.get("id", "")}'),
         })
     return items
