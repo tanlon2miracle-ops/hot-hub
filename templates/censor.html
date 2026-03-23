@@ -247,6 +247,10 @@
         <div class="num" style="color:#e67e22">{{ stats.quick_delete_count or 0 }}</div>
         <div class="label">⚡ 速删(&lt;30min)</div>
       </div>
+      <div class="stat-card">
+        <div class="num" style="color:#9b59b6">{{ stats.cross_platform_events or 0 }}</div>
+        <div class="label">🔗 跨平台联动</div>
+      </div>
       {% for m in stats.by_mode %}
       <div class="stat-card">
         <div class="num" style="color:{% if m.detection_mode == 'flash' %}#e67e22{% else %}#3498db{% endif %}">{{ m.cnt }}</div>
@@ -301,6 +305,12 @@
           <a href="{{ item.url }}" target="_blank" rel="noopener">{{ item.title }}</a>
           {% else %}
           {{ item.title }}
+          {% endif %}
+          {% if item.cross_platform and item.cross_platform.count >= 2 %}
+          <span style="font-size:0.6rem; padding:0.1rem 0.4rem; border-radius:8px; background:#f3e8ff; color:#9b59b6; margin-left:0.3rem; font-weight:600"
+                title="同时在 {{ item.cross_platform.platforms | join(', ') }} 消失">
+            🔗 {{ item.cross_platform.count }}平台联动
+          </span>
           {% endif %}
         </div>
         <div class="v-meta">

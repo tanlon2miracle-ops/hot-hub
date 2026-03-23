@@ -78,7 +78,8 @@ def calc_heat_level(rank: int, total: int) -> dict:
 
 
 def calc_suspicion_score(heat_level: int, duration_minutes: int,
-                         detection_mode: str, rank: int) -> dict:
+                         detection_mode: str, rank: int,
+                         cross_platform_count: int = 1) -> dict:
     """
     综合评估"疑似审查"可信度
     分数 0-100，越高越可疑
@@ -100,7 +101,6 @@ def calc_suspicion_score(heat_level: int, duration_minutes: int,
         score += 10
     elif duration_minutes <= 180:
         score += 5
-    # 超过 3 小时的正常降温概率高，不加分
 
     # 3. 闪删检测到的 +5（比常规 diff 更精确）
     if detection_mode == "flash":
@@ -111,6 +111,14 @@ def calc_suspicion_score(heat_level: int, duration_minutes: int,
         score += 10
     elif rank <= 10:
         score += 5
+
+    # 5. 跨平台联动：多平台同时消失 → 大幅加分
+    if cross_platform_count >= 4:
+        score += 25
+    elif cross_platform_count >= 3:
+        score += 18
+    elif cross_platform_count >= 2:
+        score += 12
 
     score = min(100, max(0, score))
 
@@ -474,9 +482,63 @@ def cleanup_flash_snapshots(keep_hours: int = 24):
 # 查询接口
 # ============================================================
 
+def _normalize_title(title: str) -> str:
+    """标题归一化，用于跨平台模糊匹配"""
+    import re
+    # 去掉 # 话题标记、空格、标点
+    s = re.sub(r'[#＃【】\[\]《》\s]', '', title)
+    return s.lower()
+
+
+def _build_cross_platform_map(items: list) -> dict:
+    """
+    构建跨平台关联映射
+    返回 { normalized_title: { platforms: set, items: [indices] } }
+    """
+    clusters = {}
+    for i, item in enumerate(items):
+        norm = _normalize_title(item.get("title", ""))
+        if not norm or len(norm) < 4:
+            continue
+        # 精确匹配
+        if norm in clusters:
+            clusters[norm]["platforms"].add(item["platform"])
+            clusters[norm]["indices"].append(i)
+        else:
+            clusters[norm] = {
+                "platforms": {item["platform"]},
+                "indices": [i],
+                "title": item.get("title", ""),
+            }
+
+    # 也做子串匹配（A 包含 B 或 B 包含 A 且 len >= 6）
+    norms = list(clusters.keys())
+    merges = {}  # norm -> canonical_norm
+    for i, a in enumerate(norms):
+        if a in merges:
+            continue
+        for b in norms[i+1:]:
+            if b in merges:
+                continue
+            if len(a) >= 6 and len(b) >= 6:
+                if a in b or b in a:
+                    canonical = a if len(a) >= len(b) else b
+                    other = b if canonical == a else a
+                    merges[other] = canonical
+                    clusters[canonical]["platforms"] |= clusters[other]["platforms"]
+                    clusters[canonical]["indices"] += clusters[other]["indices"]
+
+    # 清理合并的
+    for old in merges:
+        if old in clusters:
+            del clusters[old]
+
+    return clusters
+
+
 def get_censored_items(limit: int = 100, platform: str = None,
                        hours: int = 24) -> list:
-    """获取最近消失的条目"""
+    """获取最近消失的条目（含跨平台关联分析）"""
     conn = _get_db()
     try:
         query = """SELECT * FROM censored_item
@@ -491,21 +553,44 @@ def get_censored_items(limit: int = 100, platform: str = None,
         params.append(limit)
 
         rows = conn.execute(query, params).fetchall()
-        results = []
-        for r in rows:
-            d = dict(r)
+        results = [dict(r) for r in rows]
+
+        # 构建跨平台关联
+        cross_map = _build_cross_platform_map(results)
+
+        # 建立 index -> cross_platform_count 映射
+        idx_to_cross = {}
+        idx_to_group = {}
+        for norm, cluster in cross_map.items():
+            count = len(cluster["platforms"])
+            platforms_list = sorted(cluster["platforms"])
+            for idx in cluster["indices"]:
+                idx_to_cross[idx] = count
+                idx_to_group[idx] = {
+                    "count": count,
+                    "platforms": platforms_list,
+                    "group_title": cluster["title"],
+                }
+
+        for i, d in enumerate(results):
+            cross_count = idx_to_cross.get(i, 1)
+
             # 附加热度等级信息
             d["heat_info"] = calc_heat_level(
                 d.get("rank_when_seen", 0),
                 d.get("total_in_list", 50),
             )
-            # 可疑度评分
+            # 可疑度评分（含跨平台因子）
             d["suspicion"] = calc_suspicion_score(
                 d.get("heat_level", 0),
                 d.get("duration_minutes", 0),
                 d.get("detection_mode", "diff"),
                 d.get("rank_when_seen", 0),
+                cross_platform_count=cross_count,
             )
+            # 跨平台信息
+            d["cross_platform"] = idx_to_group.get(i, {"count": 1, "platforms": [d["platform"]]})
+
             # 曝光时长格式化
             mins = d.get("duration_minutes", 0)
             if mins >= 1440:
@@ -516,7 +601,7 @@ def get_censored_items(limit: int = 100, platform: str = None,
                 d["duration_display"] = f"{mins}分钟"
             else:
                 d["duration_display"] = "< 1分钟"
-            results.append(d)
+
         return results
     finally:
         conn.close()
@@ -562,11 +647,21 @@ def get_censor_stats(hours: int = 24) -> dict:
             (f"-{hours} hours",),
         ).fetchone()["cnt"]
 
+        # 跨平台联动事件数
+        all_items = conn.execute(
+            """SELECT title, platform FROM censored_item
+               WHERE disappeared_at >= datetime('now', 'localtime', ?)""",
+            (f"-{hours} hours",),
+        ).fetchall()
+        cross_map = _build_cross_platform_map([dict(r) for r in all_items])
+        cross_events = sum(1 for c in cross_map.values() if len(c["platforms"]) >= 2)
+
         return {
             "total": total,
             "hours": hours,
             "high_heat_count": high_heat,
             "quick_delete_count": quick_delete,
+            "cross_platform_events": cross_events,
             "by_platform": [dict(r) for r in by_platform],
             "by_mode": [dict(r) for r in by_mode],
         }
