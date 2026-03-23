@@ -66,6 +66,13 @@ PLATFORMS = [
     ("history",       "历史上的今天",   "📅", "other"),
     ("zhihu_daily",   "知乎日报",      "📘", "other"),
     ("ithome_xjy",    "IT之家喜加一",  "🎁", "other"),
+
+    # ---- 国际 ----
+    ("hackernews",    "Hacker News",   "🟧", "global"),
+    ("github_trend",  "GitHub Trending","🐙", "global"),
+    ("techcrunch",    "TechCrunch",    "🟩", "global"),
+    ("bbc_news",      "BBC News",      "🔴", "global"),
+    ("cnn",           "CNN",           "🔵", "global"),
 ]
 
 # 分类显示名
@@ -76,6 +83,7 @@ CATEGORY_NAMES = {
     "community": "👥 社区",
     "media": "🎬 影音游戏",
     "other": "📋 其他",
+    "global": "🌐 国际",
 }
 
-CATEGORY_ORDER = ["hot", "news", "tech", "community", "media", "other"]
+CATEGORY_ORDER = ["hot", "news", "tech", "community", "media", "global", "other"]

@@ -619,6 +619,123 @@ async def fetch_zhihu_daily():
     return items
 
 
+# ========== Hacker News ==========
+async def fetch_hackernews():
+    ids = await _get_json("https://hacker-news.firebaseio.com/v0/topstories.json")
+    items = []
+    # 批量取前 30 条详情
+    async def _get_item(sid):
+        return await _get_json(f"https://hacker-news.firebaseio.com/v0/item/{sid}.json")
+
+    import asyncio
+    details = await asyncio.gather(*[_get_item(sid) for sid in ids[:30]])
+    for i, v in enumerate(details, 1):
+        if not v:
+            continue
+        items.append({
+            "rank": i,
+            "title": v.get("title", ""),
+            "hot": f'{v.get("score", 0)} points',
+            "url": v.get("url", f'https://news.ycombinator.com/item?id={v.get("id", "")}'),
+            "summary": f'{v.get("descendants", 0)} comments',
+        })
+    return items
+
+
+# ========== GitHub Trending ==========
+async def fetch_github_trend():
+    html = await _get_html("https://github.com/trending")
+    soup = BeautifulSoup(html, "lxml")
+    items = []
+    repos = soup.select("article.Box-row")
+    for i, repo in enumerate(repos[:25], 1):
+        h2 = repo.select_one("h2 a")
+        if not h2:
+            continue
+        name = h2.get_text(strip=True).replace("\n", "").replace(" ", "")
+        href = h2.get("href", "")
+        url = f"https://github.com{href}" if href.startswith("/") else href
+        desc_el = repo.select_one("p")
+        desc = desc_el.get_text(strip=True) if desc_el else ""
+        stars_el = repo.select_one(".float-sm-right") or repo.select_one("span.d-inline-block.float-sm-right")
+        stars = stars_el.get_text(strip=True) if stars_el else ""
+        items.append({
+            "rank": i,
+            "title": name,
+            "hot": stars,
+            "url": url,
+            "summary": desc[:200],
+        })
+    return items
+
+
+# ========== TechCrunch ==========
+async def fetch_techcrunch():
+    html = await _get_html("https://techcrunch.com/feed/")
+    soup = BeautifulSoup(html, "xml")
+    items = []
+    for i, item in enumerate(soup.find_all("item")[:20], 1):
+        title = item.find("title").text if item.find("title") else ""
+        link = item.find("link").text if item.find("link") else ""
+        desc = item.find("description")
+        summary = ""
+        if desc:
+            # RSS description 是 HTML，提取纯文本
+            desc_soup = BeautifulSoup(desc.text, "lxml")
+            summary = desc_soup.get_text(strip=True)[:200]
+        items.append({
+            "rank": i,
+            "title": title,
+            "hot": "",
+            "url": link,
+            "summary": summary,
+        })
+    return items
+
+
+# ========== BBC News ==========
+async def fetch_bbc_news():
+    html = await _get_html("https://feeds.bbci.co.uk/news/rss.xml")
+    soup = BeautifulSoup(html, "xml")
+    items = []
+    for i, item in enumerate(soup.find_all("item")[:25], 1):
+        title = item.find("title").text if item.find("title") else ""
+        link = item.find("link").text if item.find("link") else ""
+        desc = item.find("description")
+        summary = desc.text[:200] if desc else ""
+        items.append({
+            "rank": i,
+            "title": title,
+            "hot": "",
+            "url": link,
+            "summary": summary,
+        })
+    return items
+
+
+# ========== CNN ==========
+async def fetch_cnn():
+    html = await _get_html("http://rss.cnn.com/rss/edition.rss")
+    soup = BeautifulSoup(html, "xml")
+    items = []
+    for i, item in enumerate(soup.find_all("item")[:25], 1):
+        title = item.find("title").text if item.find("title") else ""
+        link = item.find("link").text if item.find("link") else ""
+        desc = item.find("description")
+        summary = ""
+        if desc:
+            desc_soup = BeautifulSoup(desc.text, "lxml")
+            summary = desc_soup.get_text(strip=True)[:200]
+        items.append({
+            "rank": i,
+            "title": title,
+            "hot": "",
+            "url": link,
+            "summary": summary,
+        })
+    return items
+
+
 # ========== 调度表 ==========
 FETCH_MAP = {
     "bilibili": fetch_bilibili,
@@ -658,4 +775,9 @@ FETCH_MAP = {
     "earthquake": fetch_earthquake,
     "history": fetch_history,
     "zhihu_daily": fetch_zhihu_daily,
+    "hackernews": fetch_hackernews,
+    "github_trend": fetch_github_trend,
+    "techcrunch": fetch_techcrunch,
+    "bbc_news": fetch_bbc_news,
+    "cnn": fetch_cnn,
 }
