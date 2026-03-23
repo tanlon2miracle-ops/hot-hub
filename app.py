@@ -201,6 +201,9 @@ async def censor_page(request: Request, hours: int = 24):
     items = get_censored_items(limit=200, hours=hours)
     stats = get_censor_stats(hours=hours)
 
+    # 按可疑度排序（高的排前面）
+    items.sort(key=lambda x: x.get("suspicion", {}).get("score", 0), reverse=True)
+
     # 按平台分组
     platform_groups = {}
     for item in items:

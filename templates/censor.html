@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/style.css">
   <style>
     .censor-header {
-      background: linear-gradient(135deg, #2c3e50 0%, #e74c3c 100%);
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #e74c3c 100%);
     }
     .censor-main {
       max-width: 900px;
@@ -25,115 +25,171 @@
       font-size: 0.8rem;
     }
     .back-link:hover { background: rgba(255,255,255,0.35); }
+
     /* 统计卡片 */
     .stat-row {
-      display: flex;
-      gap: 1rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 0.8rem;
       margin-bottom: 1.5rem;
-      flex-wrap: wrap;
     }
     .stat-card {
-      flex: 1;
-      min-width: 140px;
       background: #fff;
       border-radius: 12px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.06);
-      padding: 1rem 1.2rem;
+      padding: 0.8rem 1rem;
       text-align: center;
     }
     .stat-card .num {
-      font-size: 2rem;
+      font-size: 1.8rem;
       font-weight: 800;
       color: #e74c3c;
+      line-height: 1.2;
     }
     .stat-card .label {
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       color: #999;
-      margin-top: 0.3rem;
+      margin-top: 0.2rem;
     }
-    /* 平台排行 */
+
+    /* 排序筛选 */
+    .filter-row {
+      display: flex;
+      gap: 0.8rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .filter-row label { font-size: 0.75rem; color: #666; font-weight: 600; }
+    .time-filter, .sort-filter { display: flex; gap: 0.4rem; }
+    .filter-btn {
+      padding: 0.25rem 0.7rem;
+      border: 1px solid #ddd;
+      border-radius: 14px;
+      background: #fff;
+      font-size: 0.72rem;
+      cursor: pointer;
+      text-decoration: none;
+      color: #333;
+      transition: all 0.15s;
+    }
+    .filter-btn.active { background: #2c3e50; color: #fff; border-color: #2c3e50; }
+    .filter-btn:hover { border-color: #e74c3c; }
+
+    /* 平台筛选 */
     .platform-bar {
       display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1.5rem;
+      gap: 0.4rem;
+      margin-bottom: 1.2rem;
       flex-wrap: wrap;
     }
     .p-badge {
-      padding: 0.3rem 0.8rem;
-      border-radius: 15px;
-      font-size: 0.75rem;
+      padding: 0.25rem 0.7rem;
+      border-radius: 14px;
+      font-size: 0.72rem;
       font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.15s;
       border: 1px solid #eee;
       background: #fff;
     }
     .p-badge.active { background: #e74c3c; color: #fff; border-color: #e74c3c; }
     .p-badge:hover { border-color: #e74c3c; }
-    .p-badge .cnt { opacity: 0.8; font-weight: 400; }
-    /* 消失条目列表 */
+    .p-badge .cnt { opacity: 0.7; font-weight: 400; }
+
+    /* 消失条目卡片 */
     .vanish-card {
       background: #fff;
       border-radius: 10px;
       box-shadow: 0 1px 6px rgba(0,0,0,0.05);
-      padding: 0.8rem 1rem;
-      margin-bottom: 0.6rem;
+      padding: 0.7rem 1rem;
+      margin-bottom: 0.5rem;
       display: flex;
-      gap: 0.8rem;
+      gap: 0.7rem;
       align-items: center;
-      border-left: 3px solid #e74c3c;
-      transition: transform 0.15s;
+      border-left: 3px solid #95a5a6;
+      transition: transform 0.15s, box-shadow 0.15s;
     }
-    .vanish-card:hover { transform: translateX(4px); }
-    .vanish-card.flash { border-left-color: #e67e22; }
+    .vanish-card:hover { transform: translateX(3px); box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+    .vanish-card.suspect-high { border-left-color: #e74c3c; background: #fff8f8; }
+    .vanish-card.suspect-medium { border-left-color: #e67e22; background: #fffcf5; }
+    .vanish-card.suspect-low { border-left-color: #f39c12; }
+    .vanish-card.suspect-none { border-left-color: #95a5a6; }
+
+    /* 可疑度条 */
+    .suspicion-bar {
+      flex-shrink: 0;
+      width: 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+    .suspicion-score {
+      font-size: 1rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .suspicion-label {
+      font-size: 0.55rem;
+      white-space: nowrap;
+    }
+    .suspicion-meter {
+      width: 100%;
+      height: 3px;
+      background: #eee;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .suspicion-meter-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.3s;
+    }
+
     .v-rank {
       flex-shrink: 0;
-      width: 32px;
-      height: 32px;
+      width: 28px;
+      height: 28px;
       border-radius: 50%;
-      background: #fde8e8;
-      color: #e74c3c;
+      background: #f5f5f5;
+      color: #999;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       font-weight: 700;
     }
-    .v-info { flex: 1; }
+    .v-rank.top3 { background: #fde8e8; color: #e74c3c; }
+    .v-info { flex: 1; min-width: 0; }
     .v-title {
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       font-weight: 600;
       color: #333;
-      margin-bottom: 0.2rem;
+      margin-bottom: 0.15rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .v-title a { color: #333; text-decoration: none; }
     .v-title a:hover { color: #e74c3c; }
     .v-meta {
-      font-size: 0.7rem;
-      color: #999;
+      font-size: 0.68rem;
+      color: #aaa;
       display: flex;
-      gap: 0.8rem;
+      gap: 0.6rem;
       flex-wrap: wrap;
     }
-    .v-platform {
-      flex-shrink: 0;
-      font-size: 0.7rem;
-      padding: 0.15rem 0.5rem;
-      border-radius: 8px;
-      background: #f0f0f0;
-      color: #666;
-    }
     .v-mode {
-      flex-shrink: 0;
       font-size: 0.6rem;
-      padding: 0.1rem 0.4rem;
-      border-radius: 6px;
+      padding: 0.08rem 0.35rem;
+      border-radius: 5px;
     }
-    .mode-diff { background: #eee; color: #666; }
+    .mode-diff { background: #f0f0f0; color: #888; }
     .mode-flash { background: #fef3e2; color: #e67e22; }
     .v-hot {
       flex-shrink: 0;
-      font-size: 0.7rem;
+      font-size: 0.68rem;
       color: #e74c3c;
       font-weight: 600;
     }
@@ -143,41 +199,34 @@
       color: #999;
     }
     .empty-state .emoji { font-size: 3rem; margin-bottom: 0.5rem; }
-    .time-filter {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1rem;
-    }
-    .time-btn {
-      padding: 0.3rem 0.8rem;
-      border: 1px solid #ddd;
-      border-radius: 15px;
-      background: #fff;
-      font-size: 0.75rem;
-      cursor: pointer;
-      text-decoration: none;
-      color: #333;
-    }
-    .time-btn.active { background: #2c3e50; color: #fff; border-color: #2c3e50; }
   </style>
 </head>
 <body>
   <header class="censor-header">
     <div class="header-inner">
       <h1>🔍 审查监测</h1>
-      <p class="subtitle">消失的热搜 · 最近 {{ hours }} 小时</p>
+      <p class="subtitle">消失的热搜 · 最近 {{ hours }} 小时 · 按可疑度排序</p>
       <a href="/" class="back-link">← 返回热榜</a>
     </div>
   </header>
 
   <div class="censor-main">
-    <!-- 时间筛选 -->
-    <div class="time-filter">
-      <a href="/censor?hours=1" class="time-btn {% if hours == 1 %}active{% endif %}">1小时</a>
-      <a href="/censor?hours=6" class="time-btn {% if hours == 6 %}active{% endif %}">6小时</a>
-      <a href="/censor?hours=24" class="time-btn {% if hours == 24 %}active{% endif %}">24小时</a>
-      <a href="/censor?hours=72" class="time-btn {% if hours == 72 %}active{% endif %}">3天</a>
-      <a href="/censor?hours=168" class="time-btn {% if hours == 168 %}active{% endif %}">7天</a>
+    <!-- 筛选行 -->
+    <div class="filter-row">
+      <label>⏰ 时间</label>
+      <div class="time-filter">
+        <a href="/censor?hours=1" class="filter-btn {% if hours == 1 %}active{% endif %}">1h</a>
+        <a href="/censor?hours=6" class="filter-btn {% if hours == 6 %}active{% endif %}">6h</a>
+        <a href="/censor?hours=24" class="filter-btn {% if hours == 24 %}active{% endif %}">24h</a>
+        <a href="/censor?hours=72" class="filter-btn {% if hours == 72 %}active{% endif %}">3天</a>
+        <a href="/censor?hours=168" class="filter-btn {% if hours == 168 %}active{% endif %}">7天</a>
+      </div>
+      <label style="margin-left:auto">🔀 排序</label>
+      <div class="sort-filter">
+        <button class="filter-btn active" onclick="sortBy('suspicion')">可疑度</button>
+        <button class="filter-btn" onclick="sortBy('time')">时间</button>
+        <button class="filter-btn" onclick="sortBy('heat')">热度</button>
+      </div>
     </div>
 
     <!-- 统计概览 -->
@@ -200,7 +249,7 @@
       </div>
       {% for m in stats.by_mode %}
       <div class="stat-card">
-        <div class="num" style="color: {% if m.detection_mode == 'flash' %}#e67e22{% else %}#3498db{% endif %}">{{ m.cnt }}</div>
+        <div class="num" style="color:{% if m.detection_mode == 'flash' %}#e67e22{% else %}#3498db{% endif %}">{{ m.cnt }}</div>
         <div class="label">{{ '⚡ 闪删检测' if m.detection_mode == 'flash' else '🔄 常规对比' }}</div>
       </div>
       {% endfor %}
@@ -219,9 +268,30 @@
 
     <!-- 消失条目列表 -->
     {% if items %}
+    <div id="vanish-list">
     {% for item in items %}
-    <div class="vanish-card {% if item.detection_mode == 'flash' %}flash{% endif %}" data-platform="{{ item.platform }}">
-      <div class="v-rank">{{ item.rank_when_seen or '?' }}</div>
+    {% set sus = item.suspicion or {} %}
+    {% set sus_score = sus.score or 0 %}
+    {% set sus_class = 'suspect-high' if sus_score >= 70 else ('suspect-medium' if sus_score >= 45 else ('suspect-low' if sus_score >= 25 else 'suspect-none')) %}
+    <div class="vanish-card {{ sus_class }}"
+         data-platform="{{ item.platform }}"
+         data-suspicion="{{ sus_score }}"
+         data-time="{{ item.disappeared_at }}"
+         data-heat="{{ item.heat_level or 0 }}">
+
+      <!-- 可疑度指示 -->
+      <div class="suspicion-bar">
+        <span class="suspicion-score" style="color:{{ sus.color or '#999' }}">{{ sus_score }}</span>
+        <div class="suspicion-meter">
+          <div class="suspicion-meter-fill" style="width:{{ sus_score }}%; background:{{ sus.color or '#999' }}"></div>
+        </div>
+        <span class="suspicion-label" style="color:{{ sus.color or '#999' }}">{{ sus.label or '—' }}</span>
+      </div>
+
+      <!-- 排名 -->
+      <div class="v-rank {% if (item.rank_when_seen or 99) <= 3 %}top3{% endif %}">{{ item.rank_when_seen or '?' }}</div>
+
+      <!-- 信息 -->
       <div class="v-info">
         <div class="v-title">
           {% if item.heat_info %}
@@ -236,18 +306,20 @@
         <div class="v-meta">
           {% set pname = platform_names.get(item.platform, (item.platform, '📋')) %}
           <span>{{ pname[1] }} {{ pname[0] }}</span>
-          <span>消失于 {{ item.disappeared_at }}</span>
-          <span>⏱️ 曝光 {{ item.duration_display or '未知' }}</span>
+          <span>消失 {{ item.disappeared_at }}</span>
+          <span>⏱️ {{ item.duration_display or '未知' }}</span>
           <span class="v-mode {% if item.detection_mode == 'flash' %}mode-flash{% else %}mode-diff{% endif %}">
             {{ '⚡闪删' if item.detection_mode == 'flash' else '🔄常规' }}
           </span>
         </div>
       </div>
+
       {% if item.hot %}
       <div class="v-hot">🔥 {{ item.hot }}</div>
       {% endif %}
     </div>
     {% endfor %}
+    </div>
     {% else %}
     <div class="empty-state">
       <div class="emoji">✅</div>
@@ -258,7 +330,7 @@
   </div>
 
   <footer>
-    <p>Hot Hub · 审查监测 · 数据仅供参考，消失原因可能包括：正常降温、平台调整、审查删除</p>
+    <p>Hot Hub · 审查监测 · 可疑度仅供参考，消失原因包括：正常降温、平台调整、审查删除</p>
   </footer>
 
   <script>
@@ -266,12 +338,23 @@
     document.querySelectorAll('.p-badge').forEach(b => b.classList.remove('active'));
     event.target.closest('.p-badge').classList.add('active');
     document.querySelectorAll('.vanish-card').forEach(card => {
-      if (platform === 'all' || card.dataset.platform === platform) {
-        card.style.display = '';
-      } else {
-        card.style.display = 'none';
-      }
+      card.style.display = (platform === 'all' || card.dataset.platform === platform) ? '' : 'none';
     });
+  }
+
+  function sortBy(key) {
+    document.querySelectorAll('.sort-filter .filter-btn').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+    const list = document.getElementById('vanish-list');
+    if (!list) return;
+    const cards = [...list.querySelectorAll('.vanish-card')];
+    cards.sort((a, b) => {
+      if (key === 'suspicion') return (parseInt(b.dataset.suspicion)||0) - (parseInt(a.dataset.suspicion)||0);
+      if (key === 'heat') return (parseInt(b.dataset.heat)||0) - (parseInt(a.dataset.heat)||0);
+      if (key === 'time') return b.dataset.time.localeCompare(a.dataset.time);
+      return 0;
+    });
+    cards.forEach(c => list.appendChild(c));
   }
   </script>
 </body>

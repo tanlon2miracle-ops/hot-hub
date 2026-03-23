@@ -77,6 +77,53 @@ def calc_heat_level(rank: int, total: int) -> dict:
         return {"level": 1, "label": "普通", "icon": "➖"}
 
 
+def calc_suspicion_score(heat_level: int, duration_minutes: int,
+                         detection_mode: str, rank: int) -> dict:
+    """
+    综合评估"疑似审查"可信度
+    分数 0-100，越高越可疑
+    返回 { score: int, label: str, color: str }
+    """
+    score = 0
+
+    # 1. 热度越高越可疑（高热条目不该突然消失）
+    score += heat_level * 12  # max 60
+
+    # 2. 曝光时间越短越可疑（刚上榜就消失 = 闪删）
+    if duration_minutes <= 5:
+        score += 25
+    elif duration_minutes <= 15:
+        score += 20
+    elif duration_minutes <= 30:
+        score += 15
+    elif duration_minutes <= 60:
+        score += 10
+    elif duration_minutes <= 180:
+        score += 5
+    # 超过 3 小时的正常降温概率高，不加分
+
+    # 3. 闪删检测到的 +5（比常规 diff 更精确）
+    if detection_mode == "flash":
+        score += 5
+
+    # 4. 排名越靠前越可疑
+    if rank <= 3:
+        score += 10
+    elif rank <= 10:
+        score += 5
+
+    score = min(100, max(0, score))
+
+    if score >= 70:
+        return {"score": score, "label": "高度可疑", "color": "#e74c3c"}
+    elif score >= 45:
+        return {"score": score, "label": "值得关注", "color": "#e67e22"}
+    elif score >= 25:
+        return {"score": score, "label": "可能正常", "color": "#f39c12"}
+    else:
+        return {"score": score, "label": "正常降温", "color": "#95a5a6"}
+
+
 def init_censor_db():
     """初始化审查监测表"""
     conn = _get_db()
@@ -150,6 +197,39 @@ def _trace_first_seen(conn, platform: str, title: str, before_batch_id: int) -> 
     return row["created_at"] if row else None
 
 
+def _batch_trace_first_seen(conn, items_to_trace: list, before_batch_id: int) -> dict:
+    """
+    批量回溯 first_seen，避免 N+1 查询
+    items_to_trace: [(platform, title), ...]
+    返回 { (platform, title): first_seen_at }
+    """
+    if not items_to_trace:
+        return {}
+
+    # 按 platform 分组查询，减少 SQL 次数
+    by_platform = {}
+    for p, t in items_to_trace:
+        by_platform.setdefault(p, []).append(t)
+
+    results = {}
+    for platform, titles in by_platform.items():
+        # 一次查出该平台所有相关条目的最早出现时间
+        placeholders = ",".join("?" * len(titles))
+        rows = conn.execute(
+            f"""SELECT hi.platform, hi.title, MIN(fb.created_at) as first_at
+                FROM hot_item hi
+                JOIN fetch_batch fb ON hi.batch_id = fb.id
+                WHERE hi.platform = ? AND hi.title IN ({placeholders})
+                AND hi.batch_id <= ?
+                GROUP BY hi.platform, hi.title""",
+            [platform] + titles + [before_batch_id],
+        ).fetchall()
+        for row in rows:
+            results[(row["platform"], row["title"])] = row["first_at"]
+
+    return results
+
+
 def _calc_duration(first_seen: str, disappeared: str) -> int:
     """计算曝光时长（分钟）"""
     try:
@@ -207,40 +287,48 @@ def diff_batches(current_batch_id: int = None) -> list:
             p = item["platform"]
             platform_totals[p] = platform_totals.get(p, 0) + 1
 
-        disappeared = []
+        # 先找出所有消失的条目
+        vanished_keys = []
+        vanished_items = []
         for item in old_items:
             key = (item["platform"], item["title"])
             if key not in new_set:
-                platform = item["platform"]
-                rank = item["rank"] or 0
-                total = platform_totals.get(platform, 50)
-                hot_str = item["hot"] or ""
+                vanished_keys.append(key)
+                vanished_items.append(item)
 
-                # 回溯最早出现时间
-                first_seen = _trace_first_seen(
-                    conn, platform, item["title"], old_batch["id"]
-                ) or old_batch["created_at"]
+        # 批量回溯 first_seen（避免 N+1）
+        first_seen_map = _batch_trace_first_seen(conn, vanished_keys, old_batch["id"])
 
-                duration = _calc_duration(first_seen, new_batch["created_at"])
-                heat = calc_heat_level(rank, total)
+        disappeared = []
+        for item in vanished_items:
+            platform = item["platform"]
+            rank = item["rank"] or 0
+            total = platform_totals.get(platform, 50)
+            hot_str = item["hot"] or ""
 
-                disappeared.append({
-                    "platform": platform,
-                    "title": item["title"],
-                    "url": item["url"],
-                    "hot": hot_str,
-                    "hot_numeric": _parse_hot(hot_str),
-                    "heat_level": heat["level"],
-                    "rank_when_seen": rank,
-                    "total_in_list": total,
-                    "first_seen_at": first_seen,
-                    "last_seen_at": old_batch["created_at"],
-                    "disappeared_at": new_batch["created_at"],
-                    "duration_minutes": duration,
-                    "batch_seen": old_batch["id"],
-                    "batch_gone": new_batch["id"],
-                    "detection_mode": "diff",
-                })
+            first_seen = first_seen_map.get(
+                (platform, item["title"]), old_batch["created_at"]
+            )
+            duration = _calc_duration(first_seen, new_batch["created_at"])
+            heat = calc_heat_level(rank, total)
+
+            disappeared.append({
+                "platform": platform,
+                "title": item["title"],
+                "url": item["url"],
+                "hot": hot_str,
+                "hot_numeric": _parse_hot(hot_str),
+                "heat_level": heat["level"],
+                "rank_when_seen": rank,
+                "total_in_list": total,
+                "first_seen_at": first_seen,
+                "last_seen_at": old_batch["created_at"],
+                "disappeared_at": new_batch["created_at"],
+                "duration_minutes": duration,
+                "batch_seen": old_batch["id"],
+                "batch_gone": new_batch["id"],
+                "detection_mode": "diff",
+            })
 
         _save_censored(conn, disappeared)
         return disappeared
@@ -310,48 +398,58 @@ def diff_flash_snapshots(platform: str) -> list:
         total = len(old_snap)
 
         new_titles = {item.get("title", "") for item in new_snap}
+
+        # 找出消失的标题
+        vanished = [item for item in old_snap
+                    if item.get("title") and item["title"] not in new_titles]
+
+        if not vanished:
+            return []
+
+        # 批量回溯：一次查出所有更早的快照
+        earlier_snaps = conn.execute(
+            """SELECT snapshot_at, data FROM flash_snapshot
+               WHERE platform=? AND id < ? ORDER BY id ASC""",
+            (platform, rows[1]["id"]),
+        ).fetchall()
+
+        # 预解析历史快照中每个 title 的最早出现时间
+        title_first_seen = {}
+        for snap in earlier_snaps:
+            snap_data = json.loads(snap["data"])
+            snap_time = snap["snapshot_at"]
+            for i in snap_data:
+                t = i.get("title", "")
+                if t and t not in title_first_seen:
+                    title_first_seen[t] = snap_time
+
         disappeared = []
+        for item in vanished:
+            title = item["title"]
+            rank = item.get("rank", 0) or 0
+            hot_str = str(item.get("hot", ""))
+            heat = calc_heat_level(rank, total)
 
-        for item in old_snap:
-            title = item.get("title", "")
-            if title and title not in new_titles:
-                rank = item.get("rank", 0) or 0
-                hot_str = str(item.get("hot", ""))
-                heat = calc_heat_level(rank, total)
-                duration = _calc_duration(rows[1]["snapshot_at"], rows[0]["snapshot_at"])
+            actual_first = title_first_seen.get(title, rows[1]["snapshot_at"])
+            total_duration = _calc_duration(actual_first, rows[0]["snapshot_at"])
 
-                # 回溯：查更早的快照看是否出现过
-                earlier = conn.execute(
-                    """SELECT snapshot_at, data FROM flash_snapshot
-                       WHERE platform=? AND id < ? ORDER BY id ASC""",
-                    (platform, rows[1]["id"]),
-                ).fetchall()
-                actual_first = rows[1]["snapshot_at"]
-                for snap in earlier:
-                    snap_data = json.loads(snap["data"])
-                    if any(i.get("title") == title for i in snap_data):
-                        actual_first = snap["snapshot_at"]
-                        break
-
-                total_duration = _calc_duration(actual_first, rows[0]["snapshot_at"])
-
-                disappeared.append({
-                    "platform": platform,
-                    "title": title,
-                    "url": item.get("url", ""),
-                    "hot": hot_str,
-                    "hot_numeric": _parse_hot(hot_str),
-                    "heat_level": heat["level"],
-                    "rank_when_seen": rank,
-                    "total_in_list": total,
-                    "first_seen_at": actual_first,
-                    "last_seen_at": rows[1]["snapshot_at"],
-                    "disappeared_at": rows[0]["snapshot_at"],
-                    "duration_minutes": total_duration,
-                    "batch_seen": rows[1]["id"],
-                    "batch_gone": rows[0]["id"],
-                    "detection_mode": "flash",
-                })
+            disappeared.append({
+                "platform": platform,
+                "title": title,
+                "url": item.get("url", ""),
+                "hot": hot_str,
+                "hot_numeric": _parse_hot(hot_str),
+                "heat_level": heat["level"],
+                "rank_when_seen": rank,
+                "total_in_list": total,
+                "first_seen_at": actual_first,
+                "last_seen_at": rows[1]["snapshot_at"],
+                "disappeared_at": rows[0]["snapshot_at"],
+                "duration_minutes": total_duration,
+                "batch_seen": rows[1]["id"],
+                "batch_gone": rows[0]["id"],
+                "detection_mode": "flash",
+            })
 
         _save_censored(conn, disappeared)
         return disappeared
@@ -400,6 +498,13 @@ def get_censored_items(limit: int = 100, platform: str = None,
             d["heat_info"] = calc_heat_level(
                 d.get("rank_when_seen", 0),
                 d.get("total_in_list", 50),
+            )
+            # 可疑度评分
+            d["suspicion"] = calc_suspicion_score(
+                d.get("heat_level", 0),
+                d.get("duration_minutes", 0),
+                d.get("detection_mode", "diff"),
+                d.get("rank_when_seen", 0),
             )
             # 曝光时长格式化
             mins = d.get("duration_minutes", 0)
