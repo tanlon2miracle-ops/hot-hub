@@ -187,11 +187,13 @@ async def platform_history(platform: str, limit: int = 10):
 
 @app.get("/api/censor")
 async def api_censor(hours: int = 24, platform: str = None,
-                     limit: int = 100, sort: str = "suspicion"):
-    """获取消失条目列表（sort: suspicion|weighted|time|heat）"""
+                     limit: int = 100, sort: str = "suspicion",
+                     show_all: bool = False):
+    """获取消失条目列表（sort: suspicion|weighted|time|heat, show_all: 显示噪音）"""
     items = get_censored_items(limit=limit, platform=platform,
-                               hours=hours, sort_by=sort)
-    stats = get_censor_stats(hours=hours)
+                               hours=hours, sort_by=sort,
+                               show_noise=show_all)
+    stats = get_censor_stats(hours=hours, show_noise=show_all)
     return {"stats": stats, "items": items}
 
 
@@ -204,10 +206,12 @@ async def api_ml_status():
 # ---------- 审查监测页面 ----------
 
 @app.get("/censor", response_class=HTMLResponse)
-async def censor_page(request: Request, hours: int = 24, sort: str = "suspicion"):
+async def censor_page(request: Request, hours: int = 24, sort: str = "suspicion",
+                      show_all: bool = False):
     """🔍 审查监测 v2 — 多因子可疑度评分"""
-    items = get_censored_items(limit=200, hours=hours, sort_by=sort)
-    stats = get_censor_stats(hours=hours)
+    items = get_censored_items(limit=200, hours=hours, sort_by=sort,
+                               show_noise=show_all)
+    stats = get_censor_stats(hours=hours, show_noise=show_all)
 
     # 按平台分组
     platform_groups = {}
@@ -227,6 +231,7 @@ async def censor_page(request: Request, hours: int = 24, sort: str = "suspicion"
         "platform_groups": platform_groups,
         "platform_names": platform_names,
         "hours": hours,
+        "show_all": show_all,
     })
 
 

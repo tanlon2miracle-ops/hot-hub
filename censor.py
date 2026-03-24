@@ -37,6 +37,70 @@ DB_PATH = Path(__file__).parent / "data" / "hot_hub.db"
 # 闪删大户 — 高频监测目标
 FLASH_DELETE_TARGETS = ["weibo", "zhihu", "baidu", "douyin", "toutiao"]
 
+# ============================================================
+# 平台 & 内容过滤（审查监测默认不展示的噪音）
+# ============================================================
+
+# 这些平台的条目正常上下榜，与审查无关，默认排除
+EXCLUDED_PLATFORMS = {
+    # 科技类 — 上下榜是正常技术内容生命周期
+    "juejin", "csdn", "v2ex", "sspai", "hellogithub", "nodeseek",
+    "hackernews", "github_trend", "techcrunch",
+    # 影音/游戏 — 内容上下榜无审查意义
+    "acfun", "douban_movie", "miyoushe",
+    "bili_trending",
+    # 热梗 — 更新频繁，噪音大
+    "weibo_meme", "nbnhhsh",
+    # 其他 — 工具/日报类
+    "zhihu_daily", "ithome_xjy", "earthquake", "history",
+    "urban_dict",
+    # 国际纯英文 — 中文审查监测意义不大
+    "bbc_news", "cnn",
+}
+
+# 标题噪音关键词 — 命中即降到 noise 级别，默认隐藏
+_NOISE_KEYWORDS = [
+    # 广告/营销/促销
+    "优惠", "折扣", "满减", "限时", "秒杀", "领券", "红包", "免费领",
+    "抽奖", "福利", "补贴", "打折", "特价", "买一送", "半价",
+    # IT 产品发布/评测（正常商业行为，非审查）
+    "发布会", "新品发布", "上市", "开售", "首发", "预售", "评测",
+    "跑分", "拆解", "开箱", "体验", "配置", "参数", "价格",
+    # 手机/数码品牌（产品类）
+    "iPhone", "华为Mate", "华为P", "小米", "OPPO", "vivo",
+    "三星Galaxy", "Redmi", "一加", "荣耀",
+    "MacBook", "iPad", "AirPods",
+    # 游戏/娱乐（正常更新）
+    "赛季更新", "新赛季", "版本更新", "活动预告",
+    # 榜单自身
+    "热搜榜", "热榜",
+]
+
+# 广告/软文特征：标题以品牌+产品词开头
+_AD_PATTERNS = [
+    r"^(华为|小米|OPPO|vivo|三星|苹果|荣耀|一加|联想|戴尔).{0,4}(手机|笔记本|平板|耳机|手表|电视)",
+    r"^(京东|淘宝|拼多多|天猫|抖音电商).{0,6}(活动|促销|大促|补贴)",
+    r"^(Steam|Epic|PS|Xbox|任天堂).{0,6}(打折|限免|喜加一|促销)",
+]
+import re as _re
+_AD_COMPILED = [_re.compile(p) for p in _AD_PATTERNS]
+
+
+def _is_noise(title: str, platform: str) -> bool:
+    """判断是否为噪音条目（广告/IT产品/营销）"""
+    if platform in EXCLUDED_PLATFORMS:
+        return True
+    if not title:
+        return False
+    for kw in _NOISE_KEYWORDS:
+        if kw in title:
+            return True
+    for pat in _AD_COMPILED:
+        if pat.search(title):
+            return True
+    return False
+
+
 # 各平台热度量纲参考（用于归一化）
 PLATFORM_HOT_SCALE = {
     "weibo": 5_000_000,
@@ -861,10 +925,12 @@ def _build_cross_platform_map(items: list) -> dict:
 # ============================================================
 
 def get_censored_items(limit: int = 100, platform: str = None,
-                       hours: int = 24, sort_by: str = "suspicion") -> list:
+                       hours: int = 24, sort_by: str = "suspicion",
+                       show_noise: bool = False) -> list:
     """
     获取最近消失的条目（含跨平台关联 + v2 可疑度评分）
     sort_by: suspicion | weighted | time | heat
+    show_noise: False=过滤广告/IT科技等噪音（默认），True=显示全部
     """
     conn = _get_db()
     try:
@@ -876,11 +942,22 @@ def get_censored_items(limit: int = 100, platform: str = None,
             query += " AND platform = ?"
             params.append(platform)
 
+        # 如果不显示噪音，在 SQL 层排除噪音平台
+        if not show_noise and not platform:
+            placeholders = ",".join("?" * len(EXCLUDED_PLATFORMS))
+            query += f" AND platform NOT IN ({placeholders})"
+            params.extend(sorted(EXCLUDED_PLATFORMS))
+
         query += " ORDER BY disappeared_at DESC LIMIT ?"
         params.append(limit)
 
         rows = conn.execute(query, params).fetchall()
         results = [dict(r) for r in rows]
+
+        # 标题级噪音过滤（非排除平台中的广告/IT产品）
+        if not show_noise:
+            results = [r for r in results
+                       if not _is_noise(r.get("title", ""), r.get("platform", ""))]
 
         # 跨平台关联
         cross_map = _build_cross_platform_map(results)
@@ -973,58 +1050,75 @@ def get_censored_items(limit: int = 100, platform: str = None,
         conn.close()
 
 
-def get_censor_stats(hours: int = 24) -> dict:
-    """统计审查概况"""
+def get_censor_stats(hours: int = 24, show_noise: bool = False) -> dict:
+    """统计审查概况（默认排除噪音平台和标题）"""
     conn = _get_db()
     try:
+        # 构建噪音平台排除条件
+        if show_noise:
+            noise_clause = ""
+            noise_params = []
+        else:
+            placeholders = ",".join("?" * len(EXCLUDED_PLATFORMS))
+            noise_clause = f" AND platform NOT IN ({placeholders})"
+            noise_params = sorted(EXCLUDED_PLATFORMS)
+
+        base_where = "disappeared_at >= datetime('now', 'localtime', ?)"
+
         total = conn.execute(
-            """SELECT COUNT(*) as cnt FROM censored_item
-               WHERE disappeared_at >= datetime('now', 'localtime', ?)""",
-            (f"-{hours} hours",),
+            f"SELECT COUNT(*) as cnt FROM censored_item WHERE {base_where}{noise_clause}",
+            [f"-{hours} hours"] + noise_params,
         ).fetchone()["cnt"]
 
         by_platform = conn.execute(
-            """SELECT platform, COUNT(*) as cnt FROM censored_item
-               WHERE disappeared_at >= datetime('now', 'localtime', ?)
+            f"""SELECT platform, COUNT(*) as cnt FROM censored_item
+               WHERE {base_where}{noise_clause}
                GROUP BY platform ORDER BY cnt DESC""",
-            (f"-{hours} hours",),
+            [f"-{hours} hours"] + noise_params,
         ).fetchall()
 
         by_mode = conn.execute(
-            """SELECT detection_mode, COUNT(*) as cnt FROM censored_item
-               WHERE disappeared_at >= datetime('now', 'localtime', ?)
+            f"""SELECT detection_mode, COUNT(*) as cnt FROM censored_item
+               WHERE {base_where}{noise_clause}
                GROUP BY detection_mode""",
-            (f"-{hours} hours",),
+            [f"-{hours} hours"] + noise_params,
         ).fetchall()
 
         high_heat = conn.execute(
-            """SELECT COUNT(*) as cnt FROM censored_item
-               WHERE disappeared_at >= datetime('now', 'localtime', ?)
+            f"""SELECT COUNT(*) as cnt FROM censored_item
+               WHERE {base_where}{noise_clause}
                AND heat_level >= 4""",
-            (f"-{hours} hours",),
+            [f"-{hours} hours"] + noise_params,
         ).fetchone()["cnt"]
 
         quick_delete = conn.execute(
-            """SELECT COUNT(*) as cnt FROM censored_item
-               WHERE disappeared_at >= datetime('now', 'localtime', ?)
+            f"""SELECT COUNT(*) as cnt FROM censored_item
+               WHERE {base_where}{noise_clause}
                AND duration_minutes > 0 AND duration_minutes < 30""",
-            (f"-{hours} hours",),
+            [f"-{hours} hours"] + noise_params,
         ).fetchone()["cnt"]
 
-        # 热度突变消失
         surge_count = conn.execute(
-            """SELECT COUNT(*) as cnt FROM censored_item
-               WHERE disappeared_at >= datetime('now', 'localtime', ?)
+            f"""SELECT COUNT(*) as cnt FROM censored_item
+               WHERE {base_where}{noise_clause}
                AND heat_level >= 3 AND duration_minutes < 60""",
-            (f"-{hours} hours",),
+            [f"-{hours} hours"] + noise_params,
         ).fetchone()["cnt"]
 
         all_items = conn.execute(
-            """SELECT title, platform FROM censored_item
-               WHERE disappeared_at >= datetime('now', 'localtime', ?)""",
-            (f"-{hours} hours",),
+            f"""SELECT title, platform FROM censored_item
+               WHERE {base_where}{noise_clause}""",
+            [f"-{hours} hours"] + noise_params,
         ).fetchall()
-        cross_map = _build_cross_platform_map([dict(r) for r in all_items])
+
+        # 标题级噪音过滤
+        if not show_noise:
+            all_items_filtered = [dict(r) for r in all_items
+                                  if not _is_noise(r["title"], r["platform"])]
+        else:
+            all_items_filtered = [dict(r) for r in all_items]
+
+        cross_map = _build_cross_platform_map(all_items_filtered)
         cross_events = sum(1 for c in cross_map.values() if len(c["platforms"]) >= 2)
 
         return {

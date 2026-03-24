@@ -345,6 +345,12 @@
         <button class="filter-btn" onclick="sortBy('time')">时间</button>
         <button class="filter-btn" onclick="sortBy('heat')">热度</button>
       </div>
+      <label style="margin-left:0.5rem">🔇 噪音</label>
+      <a href="/censor?hours={{ hours }}{% if not show_all %}&show_all=true{% endif %}"
+         class="filter-btn {% if show_all %}active{% endif %}"
+         title="显示/隐藏 IT科技、广告、产品评测等与审查无关的条目">
+        {{ '已显示全部' if show_all else '已过滤噪音' }}
+      </a>
     </div>
 
     <!-- 统计概览 -->
