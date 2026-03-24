@@ -1,18 +1,36 @@
 """
-审查监测 — 热榜消失条目检测
-方案一：Diff 对比（每小时，覆盖全平台）
-方案二：高频监测（5-10 分钟，针对闪删大户）
-+ 热度归一化（平台内排名百分位）
-+ 曝光时长回溯
+审查监测 — 热榜消失条目检测 + 舆情分析引擎
+
+检测层：
+  方案一：Diff 对比（每小时，覆盖全平台）
+  方案二：高频监测（5-10 分钟，针对闪删大户）
+
+分析层（可疑度评分 v2）：
+  ✅ 热度归一化（平台内排名百分位）    — 已实现
+  ✅ 曝光时长回溯                      — 已实现
+  ✅ 跨平台联动检测（标题模糊匹配）     — 已实现
+  ✅ 时间衰减因子（越新越重要）          — v2 新增
+  ✅ 热度突变检测（骤升骤降）            — v2 新增
+  ✅ 上榜速度异常（刚冲上来就被撤）      — v2 新增
+  ✅ 时段敏感（深夜/凌晨删除更可疑）     — v2 新增
+
+TODO（需要 ML 模型）：
+  🔲 语义敏感度分类 — 基于标题文本判断政治/社会敏感度
+  🔲 情感倾向分析   — 标题/摘要的正负面情绪
+  🔲 实体识别       — 提取人名/机构/事件，关联敏感实体库
+  🔲 话题聚类       — 基于 embedding 的语义相似聚类（替代当前的字符串匹配）
+  🔲 历史模式学习   — 学习"正常降温"曲线 vs "审查删除"曲线
 """
 
 import json
+import re
 import time
 import sqlite3
 import math
 from pathlib import Path
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Optional, Callable
 
 DB_PATH = Path(__file__).parent / "data" / "hot_hub.db"
 
@@ -20,14 +38,12 @@ DB_PATH = Path(__file__).parent / "data" / "hot_hub.db"
 FLASH_DELETE_TARGETS = ["weibo", "zhihu", "baidu", "douyin", "toutiao"]
 
 # 各平台热度量纲参考（用于归一化）
-# key: platform, value: 典型 Top1 热度值（估算）
-# 实际用排名百分位，这里备用
 PLATFORM_HOT_SCALE = {
-    "weibo": 5_000_000,    # 微博热搜 top1 约 500 万+
-    "zhihu": 30_000_000,   # 知乎热榜 top1 约 3000 万热力值
-    "baidu": 5_000_000,    # 百度热搜 top1 约 500 万
-    "douyin": 10_000_000,  # 抖音 top1 约 1000 万
-    "toutiao": 5_000_000,  # 头条 top1 约 500 万
+    "weibo": 5_000_000,
+    "zhihu": 30_000_000,
+    "baidu": 5_000_000,
+    "douyin": 10_000_000,
+    "toutiao": 5_000_000,
     "xiaohongshu": 500_000,
 }
 
@@ -55,6 +71,10 @@ def _parse_hot(hot_str: str) -> float:
         return 0
 
 
+# ============================================================
+# 热度等级
+# ============================================================
+
 def calc_heat_level(rank: int, total: int) -> dict:
     """
     根据排名百分位计算热度等级
@@ -63,13 +83,13 @@ def calc_heat_level(rank: int, total: int) -> dict:
     if total <= 0 or rank <= 0:
         return {"level": 0, "label": "未知", "icon": "⬜"}
 
-    percentile = rank / total  # 越小 = 越热
+    percentile = rank / total
 
-    if percentile <= 0.06:   # Top 3 (50条榜的前3)
+    if percentile <= 0.06:
         return {"level": 5, "label": "爆", "icon": "🔥🔥🔥"}
-    elif percentile <= 0.2:  # Top 10
+    elif percentile <= 0.2:
         return {"level": 4, "label": "高热", "icon": "🔥🔥"}
-    elif percentile <= 0.4:  # Top 20
+    elif percentile <= 0.4:
         return {"level": 3, "label": "热门", "icon": "🔥"}
     elif percentile <= 0.6:
         return {"level": 2, "label": "温热", "icon": "🌡️"}
@@ -77,67 +97,396 @@ def calc_heat_level(rank: int, total: int) -> dict:
         return {"level": 1, "label": "普通", "icon": "➖"}
 
 
+# ============================================================
+# v2 可疑度评分引擎
+# ============================================================
+
+def _time_decay_factor(disappeared_at: str, half_life_hours: float = 12.0) -> float:
+    """
+    时间衰减因子：越新的事件权重越高
+    使用指数衰减，half_life_hours 为半衰期
+    返回 0.0 ~ 1.0
+    """
+    try:
+        t = datetime.strptime(disappeared_at, "%Y-%m-%d %H:%M:%S")
+        age_hours = (datetime.now() - t).total_seconds() / 3600
+        return math.exp(-0.693 * age_hours / half_life_hours)
+    except Exception:
+        return 0.5
+
+
+def _night_deletion_bonus(disappeared_at: str) -> int:
+    """
+    深夜/凌晨删除加分（00:00-06:00 删除更可疑，因为这段时间人工审查概率高）
+    返回额外分数 0-10
+    """
+    try:
+        t = datetime.strptime(disappeared_at, "%Y-%m-%d %H:%M:%S")
+        hour = t.hour
+        if 0 <= hour < 6:
+            return 8
+        elif 6 <= hour < 8:
+            return 4
+        elif 22 <= hour <= 23:
+            return 3
+        return 0
+    except Exception:
+        return 0
+
+
+def _rapid_rise_bonus(first_seen_at: str, last_seen_at: str,
+                      rank: int, total: int) -> int:
+    """
+    上榜速度异常：短时间内冲到高排名就被删 = 很可能是敏感话题
+    返回额外分数 0-15
+    """
+    if rank <= 0 or total <= 0:
+        return 0
+    try:
+        t1 = datetime.strptime(first_seen_at, "%Y-%m-%d %H:%M:%S")
+        t2 = datetime.strptime(last_seen_at, "%Y-%m-%d %H:%M:%S")
+        alive_minutes = max(1, (t2 - t1).total_seconds() / 60)
+
+        percentile = rank / total
+        # 30 分钟内冲到 Top 10% → 极速上升
+        if alive_minutes <= 30 and percentile <= 0.1:
+            return 15
+        elif alive_minutes <= 60 and percentile <= 0.2:
+            return 10
+        elif alive_minutes <= 120 and percentile <= 0.15:
+            return 7
+        return 0
+    except Exception:
+        return 0
+
+
 def calc_suspicion_score(heat_level: int, duration_minutes: int,
                          detection_mode: str, rank: int,
-                         cross_platform_count: int = 1) -> dict:
+                         cross_platform_count: int = 1,
+                         disappeared_at: str = "",
+                         first_seen_at: str = "",
+                         last_seen_at: str = "",
+                         total_in_list: int = 50,
+                         hot_numeric: float = 0,
+                         title: str = "") -> dict:
     """
-    综合评估"疑似审查"可信度
+    综合评估"疑似审查"可信度 v2
     分数 0-100，越高越可疑
-    返回 { score: int, label: str, color: str }
+    返回 { score, weighted_score, label, color, factors }
     """
+    factors = []
     score = 0
 
-    # 1. 热度越高越可疑（高热条目不该突然消失）
-    score += heat_level * 12  # max 60
+    # ---- 1. 热度因子（max 48） ----
+    heat_score = heat_level * 8
+    # 如果有具体热度数值，额外加分
+    if hot_numeric > 1_000_000:
+        heat_score += 8
+    elif hot_numeric > 100_000:
+        heat_score += 4
+    heat_score = min(48, heat_score)
+    score += heat_score
+    if heat_score > 0:
+        factors.append({"name": "热度", "score": heat_score, "detail": f"等级{heat_level}"})
 
-    # 2. 曝光时间越短越可疑（刚上榜就消失 = 闪删）
+    # ---- 2. 曝光时长因子（max 25） ----
+    dur_score = 0
     if duration_minutes <= 5:
-        score += 25
+        dur_score = 25
     elif duration_minutes <= 15:
-        score += 20
+        dur_score = 20
     elif duration_minutes <= 30:
-        score += 15
+        dur_score = 15
     elif duration_minutes <= 60:
-        score += 10
+        dur_score = 10
     elif duration_minutes <= 180:
-        score += 5
+        dur_score = 5
+    score += dur_score
+    if dur_score > 0:
+        factors.append({"name": "曝光短", "score": dur_score, "detail": f"{duration_minutes}分钟"})
 
-    # 3. 闪删检测到的 +5（比常规 diff 更精确）
+    # ---- 3. 闪删检测 bonus（+5） ----
     if detection_mode == "flash":
         score += 5
+        factors.append({"name": "闪删检测", "score": 5, "detail": "5分钟快照"})
 
-    # 4. 排名越靠前越可疑
+    # ---- 4. 排名因子（max 10） ----
+    rank_score = 0
     if rank <= 3:
-        score += 10
+        rank_score = 10
     elif rank <= 10:
-        score += 5
+        rank_score = 6
+    elif rank <= 20:
+        rank_score = 3
+    score += rank_score
+    if rank_score > 0:
+        factors.append({"name": "排名高", "score": rank_score, "detail": f"第{rank}名"})
 
-    # 5. 跨平台联动：多平台同时消失 → 大幅加分
+    # ---- 5. 跨平台联动（max 25） ----
+    cross_score = 0
     if cross_platform_count >= 4:
-        score += 25
+        cross_score = 25
     elif cross_platform_count >= 3:
-        score += 18
+        cross_score = 18
     elif cross_platform_count >= 2:
-        score += 12
+        cross_score = 12
+    score += cross_score
+    if cross_score > 0:
+        factors.append({"name": "跨平台", "score": cross_score, "detail": f"{cross_platform_count}平台"})
 
-    score = min(100, max(0, score))
+    # ---- 6. 深夜删除 bonus（max 8） ----
+    night_score = _night_deletion_bonus(disappeared_at) if disappeared_at else 0
+    score += night_score
+    if night_score > 0:
+        factors.append({"name": "深夜删除", "score": night_score, "detail": disappeared_at[-8:]})
 
-    if score >= 70:
-        return {"score": score, "label": "高度可疑", "color": "#e74c3c"}
-    elif score >= 45:
-        return {"score": score, "label": "值得关注", "color": "#e67e22"}
-    elif score >= 25:
-        return {"score": score, "label": "可能正常", "color": "#f39c12"}
+    # ---- 7. 极速上榜 bonus（max 15） ----
+    rapid_score = 0
+    if first_seen_at and last_seen_at:
+        rapid_score = _rapid_rise_bonus(first_seen_at, last_seen_at, rank, total_in_list)
+    score += rapid_score
+    if rapid_score > 0:
+        factors.append({"name": "极速上榜", "score": rapid_score, "detail": f"{duration_minutes}min到Top{rank}"})
+
+    # ---- 8. 标题敏感词初筛（max 10，规则引擎，非 ML） ----
+    keyword_score = _keyword_sensitivity_score(title) if title else 0
+    score += keyword_score
+    if keyword_score > 0:
+        factors.append({"name": "敏感词", "score": keyword_score, "detail": "规则匹配"})
+
+    # 原始分数上限
+    raw_score = min(100, max(0, score))
+
+    # ---- 时间衰减加权（用于排序，不改变 raw score） ----
+    decay = _time_decay_factor(disappeared_at) if disappeared_at else 1.0
+    weighted_score = round(raw_score * (0.3 + 0.7 * decay), 1)
+
+    if raw_score >= 70:
+        return {"score": raw_score, "weighted_score": weighted_score,
+                "label": "高度可疑", "color": "#e74c3c", "factors": factors}
+    elif raw_score >= 45:
+        return {"score": raw_score, "weighted_score": weighted_score,
+                "label": "值得关注", "color": "#e67e22", "factors": factors}
+    elif raw_score >= 25:
+        return {"score": raw_score, "weighted_score": weighted_score,
+                "label": "可能正常", "color": "#f39c12", "factors": factors}
     else:
-        return {"score": score, "label": "正常降温", "color": "#95a5a6"}
+        return {"score": raw_score, "weighted_score": weighted_score,
+                "label": "正常降温", "color": "#95a5a6", "factors": factors}
 
+
+# ============================================================
+# 规则引擎：标题敏感词初筛
+# ============================================================
+
+# 高权重关键词（政治/社会事件/维权/安全）
+_SENSITIVE_HIGH = [
+    "官员", "书记", "局长", "部长", "市长", "省长", "主席",
+    "维权", "上访", "抗议", "游行", "罢工", "罢课",
+    "爆炸", "坍塌", "垮塌", "矿难", "火灾", "事故",
+    "警察", "城管", "暴力执法", "打人",
+    "贪腐", "受贿", "落马", "双规", "被查",
+    "封城", "封控", "隔离", "核酸",
+    "言论", "删帖", "封号", "审查", "敏感",
+    "军事", "台海", "南海",
+]
+# 中权重关键词
+_SENSITIVE_MID = [
+    "通报", "回应", "辟谣", "道歉", "处分", "免职",
+    "热搜", "撤热搜", "压热搜",
+    "央视", "新华社", "官方",
+    "房价", "失业", "裁员", "降薪",
+    "学生", "教师", "医院", "医生",
+]
+
+
+def _keyword_sensitivity_score(title: str) -> int:
+    """基于规则的标题敏感度打分（0-10）"""
+    if not title:
+        return 0
+    score = 0
+    for kw in _SENSITIVE_HIGH:
+        if kw in title:
+            score += 5
+            break  # 只计一次高权重
+    for kw in _SENSITIVE_MID:
+        if kw in title:
+            score += 3
+            break
+    return min(10, score)
+
+
+# ============================================================
+# TODO: ML 模型接口（占位，后续接入）
+# ============================================================
+
+class SensitivityClassifier:
+    """
+    TODO: 语义敏感度分类器
+    输入标题文本，输出敏感度分数 0-1 和类别标签
+    计划方案：
+      - 方案A：微调 BERT-base-chinese 在敏感词数据集上做二分类
+      - 方案B：用 LLM (如 GPT/Qwen) 做 few-shot 分类
+      - 方案C：用 sentence-transformers 做 embedding + 敏感话题向量相似度
+    """
+    def __init__(self, model_path: Optional[str] = None):
+        self.model = None
+        self.ready = False
+
+    def load(self):
+        """加载模型（TODO）"""
+        pass
+
+    def predict(self, title: str) -> dict:
+        """
+        返回 { score: 0.0-1.0, label: str, categories: [str] }
+        TODO: 实现模型推理
+        """
+        return {"score": 0.0, "label": "unknown", "categories": []}
+
+
+class SentimentAnalyzer:
+    """
+    TODO: 情感倾向分析
+    计划方案：
+      - SnowNLP（中文情感，无需GPU，精度一般）
+      - ERNIE-Sentiment / RoBERTa-wwm-ext-sentiment
+      - LLM prompt
+    """
+    def __init__(self):
+        self.ready = False
+
+    def analyze(self, text: str) -> dict:
+        """返回 { polarity: -1~1, label: positive/negative/neutral }"""
+        return {"polarity": 0.0, "label": "neutral"}
+
+
+class EntityExtractor:
+    """
+    TODO: 命名实体识别
+    提取人名、机构、地名，关联敏感实体库
+    计划方案：
+      - LAC（百度 NLP 工具，轻量）
+      - HanLP
+      - spaCy zh_core_web_trf
+    """
+    def __init__(self):
+        self.ready = False
+
+    def extract(self, text: str) -> list:
+        """返回 [{ text, type, is_sensitive }]"""
+        return []
+
+
+class TopicClusterer:
+    """
+    TODO: 语义话题聚类（替代当前的字符串匹配）
+    计划方案：
+      - sentence-transformers (paraphrase-multilingual-MiniLM) + HDBSCAN
+      - 先 embed 所有标题 → 聚类 → 同簇 = 同话题
+    """
+    def __init__(self):
+        self.ready = False
+
+    def cluster(self, titles: list) -> list:
+        """返回 [{ cluster_id, titles, centroid_title }]"""
+        return []
+
+
+class DissipationCurveDetector:
+    """
+    TODO: 历史模式学习 — 区分"正常降温"vs"审查删除"
+    思路：
+      - 收集每个条目的排名时序 [t0:rank0, t1:rank1, ...]
+      - 正常降温：排名缓慢下滑，最终滑出榜外
+      - 审查删除：排名稳定或上升中突然消失
+    需要：更细粒度的历史数据（每次快照保存排名序列）
+    """
+    def __init__(self):
+        self.ready = False
+
+    def detect(self, rank_series: list) -> dict:
+        """
+        rank_series: [(timestamp, rank), ...]
+        返回 { pattern: 'natural_decay'|'abrupt_removal'|'unknown', confidence: 0-1 }
+        """
+        return {"pattern": "unknown", "confidence": 0.0}
+
+
+# 全局模型实例（懒加载）
+_sensitivity_clf = SensitivityClassifier()
+_sentiment_analyzer = SentimentAnalyzer()
+_entity_extractor = EntityExtractor()
+_topic_clusterer = TopicClusterer()
+_curve_detector = DissipationCurveDetector()
+
+
+def get_ml_status() -> dict:
+    """获取各 ML 模块就绪状态"""
+    return {
+        "sensitivity_classifier": _sensitivity_clf.ready,
+        "sentiment_analyzer": _sentiment_analyzer.ready,
+        "entity_extractor": _entity_extractor.ready,
+        "topic_clusterer": _topic_clusterer.ready,
+        "curve_detector": _curve_detector.ready,
+    }
+
+
+# ============================================================
+# 热度突变检测
+# ============================================================
+
+def detect_hot_surge(conn, platform: str, title: str,
+                     current_batch_id: int) -> dict:
+    """
+    检测一个条目在消失前是否经历了热度骤升
+    （热度骤升后被删 = 更可疑）
+    返回 { surged: bool, surge_ratio: float, detail: str }
+    """
+    rows = conn.execute(
+        """SELECT hi.hot, hi.rank, fb.created_at
+           FROM hot_item hi
+           JOIN fetch_batch fb ON hi.batch_id = fb.id
+           WHERE hi.platform = ? AND hi.title = ? AND hi.batch_id <= ?
+           ORDER BY hi.batch_id DESC LIMIT 5""",
+        (platform, title, current_batch_id),
+    ).fetchall()
+
+    if len(rows) < 2:
+        return {"surged": False, "surge_ratio": 0, "detail": ""}
+
+    hots = [_parse_hot(r["hot"]) for r in rows]
+    # 最近的排名
+    ranks = [r["rank"] or 50 for r in rows]
+
+    # 热度突变：最新一次 vs 前几次的均值
+    latest = hots[0] if hots[0] > 0 else 1
+    older_avg = sum(hots[1:]) / len(hots[1:]) if any(hots[1:]) else 1
+    older_avg = max(older_avg, 1)
+
+    surge_ratio = latest / older_avg
+
+    # 排名突变：排名骤升（数字变小）
+    rank_change = ranks[-1] - ranks[0] if len(ranks) >= 2 else 0
+
+    if surge_ratio >= 3.0 or rank_change >= 15:
+        return {
+            "surged": True,
+            "surge_ratio": round(surge_ratio, 1),
+            "detail": f"热度x{surge_ratio:.1f}, 排名↑{rank_change}位",
+        }
+    return {"surged": False, "surge_ratio": round(surge_ratio, 1), "detail": ""}
+
+
+# ============================================================
+# 数据库初始化
+# ============================================================
 
 def init_censor_db():
     """初始化审查监测表"""
     conn = _get_db()
     try:
         conn.executescript("""
-            -- 消失条目记录表
             CREATE TABLE IF NOT EXISTS censored_item (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 platform        TEXT NOT NULL,
@@ -159,7 +508,6 @@ def init_censor_db():
                 UNIQUE(platform, title, batch_gone)
             );
 
-            -- 高频快照表（闪删大户专用）
             CREATE TABLE IF NOT EXISTS flash_snapshot (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 platform    TEXT NOT NULL,
@@ -172,7 +520,6 @@ def init_censor_db():
             CREATE INDEX IF NOT EXISTS idx_flash_platform ON flash_snapshot(platform, snapshot_at);
         """)
 
-        # 自动迁移：添加新字段
         cols = [r[1] for r in conn.execute("PRAGMA table_info(censored_item)").fetchall()]
         migrations = {
             "hot_numeric": "ALTER TABLE censored_item ADD COLUMN hot_numeric REAL DEFAULT 0",
@@ -193,18 +540,6 @@ def init_censor_db():
 # 曝光时长回溯
 # ============================================================
 
-def _trace_first_seen(conn, platform: str, title: str, before_batch_id: int) -> str:
-    """回溯找到这条热搜最早出现的时间"""
-    row = conn.execute(
-        """SELECT fb.created_at FROM hot_item hi
-           JOIN fetch_batch fb ON hi.batch_id = fb.id
-           WHERE hi.platform = ? AND hi.title = ? AND hi.batch_id <= ?
-           ORDER BY hi.batch_id ASC LIMIT 1""",
-        (platform, title, before_batch_id),
-    ).fetchone()
-    return row["created_at"] if row else None
-
-
 def _batch_trace_first_seen(conn, items_to_trace: list, before_batch_id: int) -> dict:
     """
     批量回溯 first_seen，避免 N+1 查询
@@ -214,14 +549,12 @@ def _batch_trace_first_seen(conn, items_to_trace: list, before_batch_id: int) ->
     if not items_to_trace:
         return {}
 
-    # 按 platform 分组查询，减少 SQL 次数
     by_platform = {}
     for p, t in items_to_trace:
         by_platform.setdefault(p, []).append(t)
 
     results = {}
     for platform, titles in by_platform.items():
-        # 一次查出该平台所有相关条目的最早出现时间
         placeholders = ",".join("?" * len(titles))
         rows = conn.execute(
             f"""SELECT hi.platform, hi.title, MIN(fb.created_at) as first_at
@@ -250,14 +583,12 @@ def _calc_duration(first_seen: str, disappeared: str) -> int:
 
 
 # ============================================================
-# 方案一：Diff 对比（全平台，每小时跟随主爬取）
+# 方案一：Diff 对比（全平台）
 # ============================================================
 
 def diff_batches(current_batch_id: int = None) -> list:
     """
     对比最近两个 batch，找出消失的条目
-    - 回溯 first_seen_at 计算曝光时长
-    - 计算热度等级
     """
     conn = _get_db()
     try:
@@ -277,7 +608,6 @@ def diff_batches(current_batch_id: int = None) -> list:
         new_batch = batches[0]
         old_batch = batches[1]
 
-        # 上一个 batch 的数据（带排名和热度）
         old_items = conn.execute(
             "SELECT platform, title, url, hot, rank FROM hot_item WHERE batch_id=?",
             (old_batch["id"],),
@@ -289,13 +619,11 @@ def diff_batches(current_batch_id: int = None) -> list:
 
         new_set = {(r["platform"], r["title"]) for r in new_items}
 
-        # 统计每个平台在 old_batch 中的条目总数（用于百分位）
         platform_totals = {}
         for item in old_items:
             p = item["platform"]
             platform_totals[p] = platform_totals.get(p, 0) + 1
 
-        # 先找出所有消失的条目
         vanished_keys = []
         vanished_items = []
         for item in old_items:
@@ -304,7 +632,6 @@ def diff_batches(current_batch_id: int = None) -> list:
                 vanished_keys.append(key)
                 vanished_items.append(item)
 
-        # 批量回溯 first_seen（避免 N+1）
         first_seen_map = _batch_trace_first_seen(conn, vanished_keys, old_batch["id"])
 
         disappeared = []
@@ -372,7 +699,7 @@ def _save_censored(conn, items: list):
 
 
 # ============================================================
-# 方案二：高频快照（闪删大户，5-10 分钟）
+# 方案二：高频快照（闪删大户）
 # ============================================================
 
 def save_flash_snapshot(platform: str, items: list):
@@ -389,7 +716,7 @@ def save_flash_snapshot(platform: str, items: list):
 
 
 def diff_flash_snapshots(platform: str) -> list:
-    """对比最近两次高频快照，找出闪删条目（含热度+曝光时长）"""
+    """对比最近两次高频快照，找出闪删条目"""
     conn = _get_db()
     try:
         rows = conn.execute(
@@ -407,21 +734,18 @@ def diff_flash_snapshots(platform: str) -> list:
 
         new_titles = {item.get("title", "") for item in new_snap}
 
-        # 找出消失的标题
         vanished = [item for item in old_snap
                     if item.get("title") and item["title"] not in new_titles]
 
         if not vanished:
             return []
 
-        # 批量回溯：一次查出所有更早的快照
         earlier_snaps = conn.execute(
             """SELECT snapshot_at, data FROM flash_snapshot
                WHERE platform=? AND id < ? ORDER BY id ASC""",
             (platform, rows[1]["id"]),
         ).fetchall()
 
-        # 预解析历史快照中每个 title 的最早出现时间
         title_first_seen = {}
         for snap in earlier_snaps:
             snap_data = json.loads(snap["data"])
@@ -479,13 +803,11 @@ def cleanup_flash_snapshots(keep_hours: int = 24):
 
 
 # ============================================================
-# 查询接口
+# 跨平台关联（字符串匹配 + TODO: embedding 语义匹配）
 # ============================================================
 
 def _normalize_title(title: str) -> str:
     """标题归一化，用于跨平台模糊匹配"""
-    import re
-    # 去掉 # 话题标记、空格、标点
     s = re.sub(r'[#＃【】\[\]《》\s]', '', title)
     return s.lower()
 
@@ -500,7 +822,6 @@ def _build_cross_platform_map(items: list) -> dict:
         norm = _normalize_title(item.get("title", ""))
         if not norm or len(norm) < 4:
             continue
-        # 精确匹配
         if norm in clusters:
             clusters[norm]["platforms"].add(item["platform"])
             clusters[norm]["indices"].append(i)
@@ -511,9 +832,9 @@ def _build_cross_platform_map(items: list) -> dict:
                 "title": item.get("title", ""),
             }
 
-    # 也做子串匹配（A 包含 B 或 B 包含 A 且 len >= 6）
+    # 子串匹配（A 包含 B 或 B 包含 A 且 len >= 6）
     norms = list(clusters.keys())
-    merges = {}  # norm -> canonical_norm
+    merges = {}
     for i, a in enumerate(norms):
         if a in merges:
             continue
@@ -528,7 +849,6 @@ def _build_cross_platform_map(items: list) -> dict:
                     clusters[canonical]["platforms"] |= clusters[other]["platforms"]
                     clusters[canonical]["indices"] += clusters[other]["indices"]
 
-    # 清理合并的
     for old in merges:
         if old in clusters:
             del clusters[old]
@@ -536,9 +856,16 @@ def _build_cross_platform_map(items: list) -> dict:
     return clusters
 
 
+# ============================================================
+# 查询接口
+# ============================================================
+
 def get_censored_items(limit: int = 100, platform: str = None,
-                       hours: int = 24) -> list:
-    """获取最近消失的条目（含跨平台关联分析）"""
+                       hours: int = 24, sort_by: str = "suspicion") -> list:
+    """
+    获取最近消失的条目（含跨平台关联 + v2 可疑度评分）
+    sort_by: suspicion | weighted | time | heat
+    """
     conn = _get_db()
     try:
         query = """SELECT * FROM censored_item
@@ -555,10 +882,9 @@ def get_censored_items(limit: int = 100, platform: str = None,
         rows = conn.execute(query, params).fetchall()
         results = [dict(r) for r in rows]
 
-        # 构建跨平台关联
+        # 跨平台关联
         cross_map = _build_cross_platform_map(results)
 
-        # 建立 index -> cross_platform_count 映射
         idx_to_cross = {}
         idx_to_group = {}
         for norm, cluster in cross_map.items():
@@ -572,22 +898,44 @@ def get_censored_items(limit: int = 100, platform: str = None,
                     "group_title": cluster["title"],
                 }
 
+        # 批量检测热度突变
+        surge_cache = {}
+        for i, d in enumerate(results):
+            key = (d["platform"], d["title"], d.get("batch_seen", 0))
+            if key not in surge_cache:
+                surge_cache[key] = detect_hot_surge(
+                    conn, d["platform"], d["title"], d.get("batch_seen", 0)
+                )
+
         for i, d in enumerate(results):
             cross_count = idx_to_cross.get(i, 1)
+            surge_key = (d["platform"], d["title"], d.get("batch_seen", 0))
+            surge = surge_cache.get(surge_key, {"surged": False})
 
-            # 附加热度等级信息
+            # 热度等级
             d["heat_info"] = calc_heat_level(
                 d.get("rank_when_seen", 0),
                 d.get("total_in_list", 50),
             )
-            # 可疑度评分（含跨平台因子）
+
+            # v2 可疑度评分
             d["suspicion"] = calc_suspicion_score(
                 d.get("heat_level", 0),
                 d.get("duration_minutes", 0),
                 d.get("detection_mode", "diff"),
                 d.get("rank_when_seen", 0),
                 cross_platform_count=cross_count,
+                disappeared_at=d.get("disappeared_at", ""),
+                first_seen_at=d.get("first_seen_at", ""),
+                last_seen_at=d.get("last_seen_at", ""),
+                total_in_list=d.get("total_in_list", 50),
+                hot_numeric=d.get("hot_numeric", 0),
+                title=d.get("title", ""),
             )
+
+            # 热度突变
+            d["surge"] = surge
+
             # 跨平台信息
             d["cross_platform"] = idx_to_group.get(i, {"count": 1, "platforms": [d["platform"]]})
 
@@ -601,6 +949,24 @@ def get_censored_items(limit: int = 100, platform: str = None,
                 d["duration_display"] = f"{mins}分钟"
             else:
                 d["duration_display"] = "< 1分钟"
+
+            # ML 模块占位（当模型 ready 时自动填充）
+            if _sensitivity_clf.ready:
+                d["sensitivity"] = _sensitivity_clf.predict(d.get("title", ""))
+            if _sentiment_analyzer.ready:
+                d["sentiment"] = _sentiment_analyzer.analyze(d.get("title", ""))
+            if _entity_extractor.ready:
+                d["entities"] = _entity_extractor.extract(d.get("title", ""))
+
+        # 排序
+        if sort_by == "weighted":
+            results.sort(key=lambda x: x.get("suspicion", {}).get("weighted_score", 0), reverse=True)
+        elif sort_by == "time":
+            results.sort(key=lambda x: x.get("disappeared_at", ""), reverse=True)
+        elif sort_by == "heat":
+            results.sort(key=lambda x: x.get("heat_level", 0), reverse=True)
+        else:  # suspicion (default)
+            results.sort(key=lambda x: x.get("suspicion", {}).get("score", 0), reverse=True)
 
         return results
     finally:
@@ -631,7 +997,6 @@ def get_censor_stats(hours: int = 24) -> dict:
             (f"-{hours} hours",),
         ).fetchall()
 
-        # 高热消失（heat_level >= 4）
         high_heat = conn.execute(
             """SELECT COUNT(*) as cnt FROM censored_item
                WHERE disappeared_at >= datetime('now', 'localtime', ?)
@@ -639,7 +1004,6 @@ def get_censor_stats(hours: int = 24) -> dict:
             (f"-{hours} hours",),
         ).fetchone()["cnt"]
 
-        # 速删（曝光 < 30 分钟）
         quick_delete = conn.execute(
             """SELECT COUNT(*) as cnt FROM censored_item
                WHERE disappeared_at >= datetime('now', 'localtime', ?)
@@ -647,7 +1011,14 @@ def get_censor_stats(hours: int = 24) -> dict:
             (f"-{hours} hours",),
         ).fetchone()["cnt"]
 
-        # 跨平台联动事件数
+        # 热度突变消失
+        surge_count = conn.execute(
+            """SELECT COUNT(*) as cnt FROM censored_item
+               WHERE disappeared_at >= datetime('now', 'localtime', ?)
+               AND heat_level >= 3 AND duration_minutes < 60""",
+            (f"-{hours} hours",),
+        ).fetchone()["cnt"]
+
         all_items = conn.execute(
             """SELECT title, platform FROM censored_item
                WHERE disappeared_at >= datetime('now', 'localtime', ?)""",
@@ -662,8 +1033,10 @@ def get_censor_stats(hours: int = 24) -> dict:
             "high_heat_count": high_heat,
             "quick_delete_count": quick_delete,
             "cross_platform_events": cross_events,
+            "surge_count": surge_count,
             "by_platform": [dict(r) for r in by_platform],
             "by_mode": [dict(r) for r in by_mode],
+            "ml_status": get_ml_status(),
         }
     finally:
         conn.close()

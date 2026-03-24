@@ -21,7 +21,7 @@ from scheduler import (
     fetch_all_and_save, start_scheduler, stop_scheduler,
     get_scheduler_status, get_fetcher,
 )
-from censor import init_censor_db, get_censored_items, get_censor_stats
+from censor import init_censor_db, get_censored_items, get_censor_stats, get_ml_status
 
 
 # ---------- 生命周期 ----------
@@ -186,23 +186,28 @@ async def platform_history(platform: str, limit: int = 10):
 # ---------- 审查监测 API ----------
 
 @app.get("/api/censor")
-async def api_censor(hours: int = 24, platform: str = None, limit: int = 100):
-    """获取消失条目列表"""
-    items = get_censored_items(limit=limit, platform=platform, hours=hours)
+async def api_censor(hours: int = 24, platform: str = None,
+                     limit: int = 100, sort: str = "suspicion"):
+    """获取消失条目列表（sort: suspicion|weighted|time|heat）"""
+    items = get_censored_items(limit=limit, platform=platform,
+                               hours=hours, sort_by=sort)
     stats = get_censor_stats(hours=hours)
     return {"stats": stats, "items": items}
+
+
+@app.get("/api/censor/ml-status")
+async def api_ml_status():
+    """查看 ML 模块就绪状态"""
+    return get_ml_status()
 
 
 # ---------- 审查监测页面 ----------
 
 @app.get("/censor", response_class=HTMLResponse)
-async def censor_page(request: Request, hours: int = 24):
-    """🔍 审查监测 — 消失的热搜"""
-    items = get_censored_items(limit=200, hours=hours)
+async def censor_page(request: Request, hours: int = 24, sort: str = "suspicion"):
+    """🔍 审查监测 v2 — 多因子可疑度评分"""
+    items = get_censored_items(limit=200, hours=hours, sort_by=sort)
     stats = get_censor_stats(hours=hours)
-
-    # 按可疑度排序（高的排前面）
-    items.sort(key=lambda x: x.get("suspicion", {}).get("score", 0), reverse=True)
 
     # 按平台分组
     platform_groups = {}
