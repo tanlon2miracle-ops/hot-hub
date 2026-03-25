@@ -466,6 +466,35 @@
             <span class="factor-detail">{{ f.detail }}</span>
           </span>
           {% endfor %}
+
+          {# 情感分析标签 #}
+          {% if item.sentiment %}
+          {% set smt = item.sentiment %}
+          <span class="factor-tag {% if smt.label == 'negative' %}hot{% elif smt.label == 'positive' %}rapid{% endif %} factor-tooltip">
+            {{ '😠' if smt.label == 'negative' else ('😊' if smt.label == 'positive' else '😐') }} {{ smt.label }} {{ smt.polarity }}
+            <span class="factor-detail">SnowNLP 情感: {{ smt.score }}</span>
+          </span>
+          {% endif %}
+
+          {# 降温曲线标签 #}
+          {% if item.curve and item.curve.pattern != 'unknown' %}
+          {% set crv = item.curve %}
+          <span class="factor-tag {% if crv.pattern == 'abrupt_removal' %}hot{% elif crv.pattern == 'stable_removal' %}surge{% elif crv.pattern == 'natural_decay' %}time{% endif %} factor-tooltip">
+            {{ '🚨' if crv.pattern == 'abrupt_removal' else ('⚠️' if crv.pattern == 'stable_removal' else '📉') }} {{ crv.pattern | replace('_', ' ') }} ({{ (crv.confidence * 100) | int }}%)
+            <span class="factor-detail">{{ crv.detail }}</span>
+          </span>
+          {% endif %}
+
+          {# 敏感实体标签 #}
+          {% if item.entities %}
+          {% set sensitive_ents = item.entities | selectattr('is_sensitive') | list %}
+          {% if sensitive_ents %}
+          <span class="factor-tag keyword factor-tooltip">
+            🏷️ {{ sensitive_ents | length }}个敏感实体
+            <span class="factor-detail">{{ sensitive_ents | map(attribute='text') | join(', ') }}</span>
+          </span>
+          {% endif %}
+          {% endif %}
         </div>
         {% endif %}
       </div>

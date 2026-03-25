@@ -381,100 +381,317 @@ def _keyword_sensitivity_score(title: str) -> int:
 
 
 # ============================================================
-# TODO: ML 模型接口（占位，后续接入）
+# 分析模块实现（Phase 1：轻量 NLP + 统计）
 # ============================================================
 
 class SensitivityClassifier:
     """
-    TODO: 语义敏感度分类器
-    输入标题文本，输出敏感度分数 0-1 和类别标签
-    计划方案：
-      - 方案A：微调 BERT-base-chinese 在敏感词数据集上做二分类
-      - 方案B：用 LLM (如 GPT/Qwen) 做 few-shot 分类
-      - 方案C：用 sentence-transformers 做 embedding + 敏感话题向量相似度
+    TODO: 语义敏感度分类器（Phase 4 — 需微调 BERT）
+    当前仅占位，等积累标注数据后实现
     """
     def __init__(self, model_path: Optional[str] = None):
         self.model = None
         self.ready = False
 
     def load(self):
-        """加载模型（TODO）"""
         pass
 
     def predict(self, title: str) -> dict:
-        """
-        返回 { score: 0.0-1.0, label: str, categories: [str] }
-        TODO: 实现模型推理
-        """
         return {"score": 0.0, "label": "unknown", "categories": []}
 
 
 class SentimentAnalyzer:
     """
-    TODO: 情感倾向分析
-    计划方案：
-      - SnowNLP（中文情感，无需GPU，精度一般）
-      - ERNIE-Sentiment / RoBERTa-wwm-ext-sentiment
-      - LLM prompt
+    Phase 1.2 — 基于 SnowNLP 的轻量情感分析
+    SnowNLP 输出 0-1 的正面概率，我们映射为 polarity -1~1
+    精度一般但零成本启动，后续可替换为 BERT
     """
     def __init__(self):
         self.ready = False
+        self._snownlp = None
+
+    def _ensure_loaded(self):
+        if self._snownlp is not None:
+            return True
+        try:
+            import snownlp as _sn
+            self._snownlp = _sn
+            self.ready = True
+            return True
+        except ImportError:
+            return False
 
     def analyze(self, text: str) -> dict:
-        """返回 { polarity: -1~1, label: positive/negative/neutral }"""
-        return {"polarity": 0.0, "label": "neutral"}
+        """
+        返回 { polarity: -1.0~1.0, score: 0~1, label: positive/negative/neutral }
+        polarity = (snownlp_score - 0.5) * 2  → 映射到 [-1, 1]
+        """
+        if not text or not self._ensure_loaded():
+            return {"polarity": 0.0, "score": 0.5, "label": "neutral"}
+        try:
+            s = self._snownlp.SnowNLP(text)
+            score = s.sentiments  # 0~1, 1=positive
+            polarity = round((score - 0.5) * 2, 3)
+            if score >= 0.6:
+                label = "positive"
+            elif score <= 0.4:
+                label = "negative"
+            else:
+                label = "neutral"
+            return {"polarity": polarity, "score": round(score, 3), "label": label}
+        except Exception:
+            return {"polarity": 0.0, "score": 0.5, "label": "neutral"}
+
+
+# 敏感实体词典路径
+_SENSITIVE_ENTITIES_PATH = Path(__file__).parent / "data" / "sensitive_entities.json"
+
+# 默认敏感实体词典（如果 json 文件不存在则使用）
+_DEFAULT_SENSITIVE_ENTITIES = {
+    "person_titles": [
+        "书记", "省长", "市长", "县长", "区长", "局长", "部长", "主任",
+        "院长", "校长", "处长", "科长", "厅长", "司长", "主席", "副主席",
+        "总理", "副总理", "委员", "纪委", "监委", "政委",
+    ],
+    "org_keywords": [
+        "中央", "国务院", "公安", "城管", "纪委", "监委", "法院", "检察院",
+        "政府", "人大", "政协", "军区", "武警", "央行", "证监会", "银保监",
+    ],
+    "sensitive_locations": [
+        "天安门", "中南海", "新疆", "西藏", "香港", "台湾", "澳门",
+    ],
+    "event_keywords": [
+        "维权", "上访", "请愿", "示威", "罢工", "集会", "游行",
+        "坍塌", "垮塌", "爆炸", "矿难", "事故", "火灾",
+        "贪腐", "受贿", "行贿", "落马", "双规", "留置", "被查",
+    ],
+}
+
+
+def _load_sensitive_entities() -> dict:
+    """加载敏感实体词典"""
+    if _SENSITIVE_ENTITIES_PATH.exists():
+        try:
+            with open(_SENSITIVE_ENTITIES_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return _DEFAULT_SENSITIVE_ENTITIES
 
 
 class EntityExtractor:
     """
-    TODO: 命名实体识别
-    提取人名、机构、地名，关联敏感实体库
-    计划方案：
-      - LAC（百度 NLP 工具，轻量）
-      - HanLP
-      - spaCy zh_core_web_trf
+    Phase 1.3 — 基于 jieba 分词 + 敏感实体词典的轻量 NER
+    提取人名/地名/机构，并标记是否命中敏感实体库
     """
     def __init__(self):
         self.ready = False
+        self._jieba = None
+        self._entities_dict = None
+
+    def _ensure_loaded(self):
+        if self._jieba is not None:
+            return True
+        try:
+            import jieba
+            import jieba.posseg as pseg
+            self._jieba = jieba
+            self._pseg = pseg
+            self._entities_dict = _load_sensitive_entities()
+
+            # 把敏感实体加入 jieba 词典，提升分词准确度
+            for category, words in self._entities_dict.items():
+                for w in words:
+                    jieba.suggest_freq(w, tune=True)
+
+            self.ready = True
+            return True
+        except ImportError:
+            return False
 
     def extract(self, text: str) -> list:
-        """返回 [{ text, type, is_sensitive }]"""
-        return []
+        """
+        返回 [{ text: str, type: str, is_sensitive: bool }]
+        type: person / location / organization / event / unknown
+        """
+        if not text or not self._ensure_loaded():
+            return []
+
+        results = []
+        seen = set()
+
+        # 1) jieba 词性标注提取实体
+        words = self._pseg.cut(text)
+        for word, flag in words:
+            word = word.strip()
+            if len(word) < 2 or word in seen:
+                continue
+            entity_type = None
+            if flag.startswith("nr"):     # 人名
+                entity_type = "person"
+            elif flag.startswith("ns"):   # 地名
+                entity_type = "location"
+            elif flag.startswith("nt"):   # 机构
+                entity_type = "organization"
+
+            if entity_type:
+                is_sensitive = self._check_sensitive(word, entity_type)
+                results.append({
+                    "text": word,
+                    "type": entity_type,
+                    "is_sensitive": is_sensitive,
+                })
+                seen.add(word)
+
+        # 2) 规则匹配：检查敏感关键词是否出现在文本中
+        for kw in self._entities_dict.get("person_titles", []):
+            if kw in text and kw not in seen:
+                results.append({"text": kw, "type": "person", "is_sensitive": True})
+                seen.add(kw)
+        for kw in self._entities_dict.get("org_keywords", []):
+            if kw in text and kw not in seen:
+                results.append({"text": kw, "type": "organization", "is_sensitive": True})
+                seen.add(kw)
+        for kw in self._entities_dict.get("sensitive_locations", []):
+            if kw in text and kw not in seen:
+                results.append({"text": kw, "type": "location", "is_sensitive": True})
+                seen.add(kw)
+        for kw in self._entities_dict.get("event_keywords", []):
+            if kw in text and kw not in seen:
+                results.append({"text": kw, "type": "event", "is_sensitive": True})
+                seen.add(kw)
+
+        return results
+
+    def _check_sensitive(self, word: str, entity_type: str) -> bool:
+        """检查一个实体是否在敏感词典中"""
+        if not self._entities_dict:
+            return False
+        all_sensitive = []
+        for v in self._entities_dict.values():
+            all_sensitive.extend(v)
+        return word in all_sensitive or any(s in word for s in all_sensitive)
 
 
 class TopicClusterer:
     """
-    TODO: 语义话题聚类（替代当前的字符串匹配）
-    计划方案：
-      - sentence-transformers (paraphrase-multilingual-MiniLM) + HDBSCAN
-      - 先 embed 所有标题 → 聚类 → 同簇 = 同话题
+    TODO: 语义话题聚类（Phase 2.3 — 需 sentence-transformers + HDBSCAN）
+    当前使用字符串匹配，积累数据后升级为 embedding 聚类
     """
     def __init__(self):
         self.ready = False
 
     def cluster(self, titles: list) -> list:
-        """返回 [{ cluster_id, titles, centroid_title }]"""
         return []
 
 
 class DissipationCurveDetector:
     """
-    TODO: 历史模式学习 — 区分"正常降温"vs"审查删除"
-    思路：
-      - 收集每个条目的排名时序 [t0:rank0, t1:rank1, ...]
-      - 正常降温：排名缓慢下滑，最终滑出榜外
-      - 审查删除：排名稳定或上升中突然消失
-    需要：更细粒度的历史数据（每次快照保存排名序列）
+    Phase 1.1 — 降温曲线检测（纯统计方法）
+    通过分析排名时序判断是"正常降温"还是"异常删除"
+
+    正常降温特征：
+      - 排名逐渐上升（数字变大，越来越靠后）
+      - 变化平缓，无突变
+      - 在榜时间较长
+
+    审查删除特征：
+      - 排名稳定或仍在上升中突然消失
+      - 最后几个数据点排名平稳或改善
+      - 在榜时间可能很短
     """
     def __init__(self):
-        self.ready = False
+        self.ready = True  # 纯统计，无需模型加载
 
     def detect(self, rank_series: list) -> dict:
         """
-        rank_series: [(timestamp, rank), ...]
-        返回 { pattern: 'natural_decay'|'abrupt_removal'|'unknown', confidence: 0-1 }
+        rank_series: [(timestamp_str, rank_int), ...] 按时间升序
+        返回 {
+            pattern: 'natural_decay' | 'abrupt_removal' | 'stable_removal' | 'unknown',
+            confidence: 0.0-1.0,
+            detail: str,
+            slope: float,       # 排名变化斜率（正=降温，负=升温）
+            last_rank: int,
+            volatility: float,  # 排名波动性
+        }
         """
-        return {"pattern": "unknown", "confidence": 0.0}
+        if not rank_series or len(rank_series) < 2:
+            return {"pattern": "unknown", "confidence": 0.0,
+                    "detail": "数据点不足", "slope": 0, "last_rank": 0, "volatility": 0}
+
+        ranks = [r[1] for r in rank_series]
+        n = len(ranks)
+        last_rank = ranks[-1]
+
+        # ---- 线性回归计算斜率 ----
+        # x = [0, 1, 2, ...], y = ranks
+        x_mean = (n - 1) / 2.0
+        y_mean = sum(ranks) / n
+        numerator = sum((i - x_mean) * (r - y_mean) for i, r in enumerate(ranks))
+        denominator = sum((i - x_mean) ** 2 for i in range(n))
+        slope = numerator / denominator if denominator > 0 else 0
+
+        # ---- 最后 N 点趋势（更关注消失前的状态） ----
+        tail_n = min(3, n)
+        tail_ranks = ranks[-tail_n:]
+        tail_slope = (tail_ranks[-1] - tail_ranks[0]) / max(tail_n - 1, 1)
+
+        # ---- 排名波动性（标准差） ----
+        rank_var = sum((r - y_mean) ** 2 for r in ranks) / n
+        volatility = math.sqrt(rank_var)
+
+        # ---- 判断逻辑 ----
+        # 1) 排名在改善（数字变小）或稳定 → 然后突然消失 = 最可疑
+        if tail_slope <= 0 and last_rank <= n * 0.5:
+            # 排名在上升或稳定，且位置靠前
+            pattern = "abrupt_removal"
+            confidence = min(0.95, 0.6 + abs(tail_slope) * 0.05 + (1 - last_rank / max(n * 2, 1)) * 0.3)
+            detail = f"排名稳定/上升中消失(末段斜率{tail_slope:+.1f}, 末位#{last_rank})"
+
+        elif tail_slope <= 1.0 and slope <= 1.0:
+            # 排名变化平缓但也不是明显下滑 → 可能被删
+            pattern = "stable_removal"
+            confidence = min(0.8, 0.4 + (1 - slope / 5) * 0.2 + (1 - last_rank / max(n * 3, 1)) * 0.2)
+            detail = f"排名平稳中消失(总斜率{slope:+.1f}, 末位#{last_rank})"
+
+        elif slope > 2.0 and last_rank > n * 0.6:
+            # 排名持续下滑（数字变大），靠后位置消失 → 自然降温
+            pattern = "natural_decay"
+            confidence = min(0.9, 0.5 + slope * 0.05 + last_rank / max(n * 3, 1) * 0.2)
+            detail = f"排名持续下滑(斜率{slope:+.1f}, 末位#{last_rank})"
+
+        else:
+            # 不确定
+            pattern = "unknown"
+            confidence = 0.3
+            detail = f"模式不明确(斜率{slope:+.1f}, 末段{tail_slope:+.1f}, 末位#{last_rank})"
+
+        return {
+            "pattern": pattern,
+            "confidence": round(confidence, 2),
+            "detail": detail,
+            "slope": round(slope, 2),
+            "last_rank": last_rank,
+            "volatility": round(volatility, 2),
+        }
+
+
+def _get_rank_series(conn, platform: str, title: str,
+                     before_batch_id: int) -> list:
+    """
+    从数据库提取某条目的排名时序
+    返回 [(created_at, rank), ...] 按时间升序
+    """
+    rows = conn.execute(
+        """SELECT fb.created_at, hi.rank
+           FROM hot_item hi
+           JOIN fetch_batch fb ON hi.batch_id = fb.id
+           WHERE hi.platform = ? AND hi.title = ?
+           AND hi.batch_id <= ?
+           ORDER BY fb.created_at ASC""",
+        (platform, title, before_batch_id),
+    ).fetchall()
+    return [(r["created_at"], r["rank"] or 50) for r in rows]
 
 
 # 全局模型实例（懒加载）
@@ -483,6 +700,10 @@ _sentiment_analyzer = SentimentAnalyzer()
 _entity_extractor = EntityExtractor()
 _topic_clusterer = TopicClusterer()
 _curve_detector = DissipationCurveDetector()
+
+# 预初始化轻量模块（SnowNLP / jieba 首次加载较慢，提前触发）
+_sentiment_analyzer._ensure_loaded()
+_entity_extractor._ensure_loaded()
 
 
 def get_ml_status() -> dict:
@@ -1027,13 +1248,26 @@ def get_censored_items(limit: int = 100, platform: str = None,
             else:
                 d["duration_display"] = "< 1分钟"
 
-            # ML 模块占位（当模型 ready 时自动填充）
-            if _sensitivity_clf.ready:
-                d["sensitivity"] = _sensitivity_clf.predict(d.get("title", ""))
-            if _sentiment_analyzer.ready:
-                d["sentiment"] = _sentiment_analyzer.analyze(d.get("title", ""))
-            if _entity_extractor.ready:
-                d["entities"] = _entity_extractor.extract(d.get("title", ""))
+            # ---- 分析模块填充 ----
+            # 情感分析（SnowNLP — Phase 1.2）
+            title_text = d.get("title", "")
+            if _sentiment_analyzer.ready and title_text:
+                d["sentiment"] = _sentiment_analyzer.analyze(title_text)
+
+            # 实体识别（jieba — Phase 1.3）
+            if _entity_extractor.ready and title_text:
+                d["entities"] = _entity_extractor.extract(title_text)
+
+            # 降温曲线检测（统计 — Phase 1.1）
+            if _curve_detector.ready:
+                rank_series = _get_rank_series(
+                    conn, d["platform"], title_text, d.get("batch_seen", 0)
+                )
+                d["curve"] = _curve_detector.detect(rank_series)
+
+            # 敏感度分类（TODO — Phase 4）
+            if _sensitivity_clf.ready and title_text:
+                d["sensitivity"] = _sensitivity_clf.predict(title_text)
 
         # 排序
         if sort_by == "weighted":
