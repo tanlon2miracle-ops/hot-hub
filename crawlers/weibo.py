@@ -29,6 +29,11 @@ async def fetch() -> list[dict]:
         url = f"https://s.weibo.com/weibo?q=%23{word}%23"
         category = item.get("category", "")
         detail_tag = item.get("detail_tag", "")
+        # detail_tag 可能是 dict（新版API）或 str（旧版），统一处理
+        if isinstance(detail_tag, dict):
+            detail_tag = detail_tag.get("content", "")
+        elif not isinstance(detail_tag, str):
+            detail_tag = str(detail_tag)
         # 组合摘要：分类 + 详情标签
         summary_parts = []
         if category:

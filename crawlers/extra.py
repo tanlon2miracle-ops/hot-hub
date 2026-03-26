@@ -109,16 +109,37 @@ async def fetch_kuaishou():
 
 # ========== 百度贴吧 ==========
 async def fetch_tieba():
-    data = await _get_json("https://tieba.baidu.com/hottopic/browse/topicList?res_type=1")
-    items = []
-    for i, v in enumerate(data.get("data", {}).get("bang_topic", {}).get("topic_list", [])[:30], 1):
-        items.append({
-            "rank": i,
-            "title": v.get("topic_name", ""),
-            "hot": v.get("discuss_num", ""),
-            "url": v.get("topic_url", ""),
-        })
-    return items
+    # 百度贴吧旧接口已返回 HTML 而非 JSON，改用 HTML 解析
+    try:
+        html = await _get_html("https://tieba.baidu.com/hottopic/browse/topicList")
+        soup = BeautifulSoup(html, "lxml")
+        items = []
+        # 尝试从页面提取热议话题
+        for i, el in enumerate(soup.select(".topic-top-item, .topic-item, a.topic-text")[:30], 1):
+            title = el.get_text(strip=True)
+            href = el.get("href", "")
+            if not title or len(title) < 2:
+                continue
+            url = f"https://tieba.baidu.com{href}" if href.startswith("/") else href
+            items.append({"rank": i, "title": title, "hot": "", "url": url})
+        if items:
+            return items
+    except Exception:
+        pass
+    # 回退：尝试直接从 JSON 解析（兼容旧版本）
+    try:
+        data = await _get_json("https://tieba.baidu.com/hottopic/browse/topicList?res_type=1")
+        items = []
+        for i, v in enumerate(data.get("data", {}).get("bang_topic", {}).get("topic_list", [])[:30], 1):
+            items.append({
+                "rank": i,
+                "title": v.get("topic_name", ""),
+                "hot": v.get("discuss_num", ""),
+                "url": v.get("topic_url", ""),
+            })
+        return items
+    except Exception:
+        return []
 
 
 # ========== 腾讯新闻 ==========
@@ -228,7 +249,21 @@ async def fetch_kr36():
 
 # ========== 虎嗅 ==========
 async def fetch_huxiu():
-    data = await _get_json("https://api-article.huxiu.com/web/article/articleList?page=1&pagesize=30")
+    # 虎嗅 API 需要 POST + platform 参数（2026 年接口变更）
+    headers = {
+        **HEADERS,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Referer": "https://www.huxiu.com/",
+        "Origin": "https://www.huxiu.com",
+    }
+    async with httpx.AsyncClient(timeout=10, headers=headers, follow_redirects=True) as c:
+        resp = await c.post(
+            "https://api-article.huxiu.com/web/article/articleList",
+            data={"platform": "www", "page": 1, "pagesize": 30,
+                  "refer_page": "channel", "channel_id": 0},
+        )
+        resp.raise_for_status()
+        data = resp.json()
     items = []
     for i, v in enumerate(data.get("data", {}).get("datalist", [])[:30], 1):
         items.append({
@@ -237,6 +272,19 @@ async def fetch_huxiu():
             "hot": "",
             "url": f'https://www.huxiu.com/article/{v.get("aid", "")}' if v.get("aid") else "",
         })
+    # 如果 API 返回空，回退到 HTML 解析
+    if not items:
+        try:
+            resp2 = await c.get("https://www.huxiu.com/channel/all.html")
+            soup = BeautifulSoup(resp2.text, "lxml")
+            for i, a in enumerate(soup.select("h2 a, .article-item-title a")[:30], 1):
+                title = a.get_text(strip=True)
+                href = a.get("href", "")
+                if title and len(title) > 3:
+                    url = f"https://www.huxiu.com{href}" if href.startswith("/") else href
+                    items.append({"rank": i, "title": title, "hot": "", "url": url})
+        except Exception:
+            pass
     return items
 
 
@@ -332,21 +380,39 @@ async def fetch_sspai():
 
 # ========== HelloGitHub ==========
 async def fetch_hellogithub():
-    data = await _get_json("https://api.hellogithub.com/v1/periodical/hot/?page=1&page_size=30")
+    # /v1/ 根接口返回热门项目列表（/v1/periodical/hot/ 已 404）
+    data = await _get_json("https://api.hellogithub.com/v1/?page=1&page_size=30")
     items = []
     for i, v in enumerate(data.get("data", [])[:30], 1):
+        name = v.get("name", v.get("full_name", ""))
+        title = v.get("title", v.get("title_en", ""))
+        display = f"{name} - {title}" if name and title else (name or title)
         items.append({
             "rank": i,
-            "title": f'{v.get("name", "")} - {v.get("title", "")}',
-            "hot": f'⭐{v.get("stars_str", "")}',
+            "title": display,
+            "hot": f'⭐{v.get("stars_str", v.get("stars", ""))}',
             "url": v.get("github_url", v.get("url", "")),
+            "summary": v.get("summary", v.get("summary_en", ""))[:100],
         })
     return items
 
 
 # ========== NodeSeek ==========
 async def fetch_nodeseek():
-    html = await _get_html("https://www.nodeseek.com/")
+    # NodeSeek 有 Cloudflare 防护，需要更完整的 headers
+    nodeseek_headers = {
+        **HEADERS,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+    }
+    async with httpx.AsyncClient(timeout=15, headers=nodeseek_headers,
+                                  follow_redirects=True) as c:
+        resp = await c.get("https://www.nodeseek.com/")
+    html = resp.text
+    if resp.status_code == 403 or "post-title" not in html:
+        return []  # 被 CF 拦截，静默返回空
     soup = BeautifulSoup(html, "lxml")
     items = []
     posts = soup.select(".post-title a")
